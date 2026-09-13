@@ -6,14 +6,23 @@ import { PromptInput } from "./components/PromptInput.js";
 import { HistorySidebar } from "./components/HistorySidebar.js";
 import { RunHeader } from "./components/RunHeader.js";
 import { TeamBoard } from "./components/TeamBoard.js";
+import { GalaxyView } from "./components/GalaxyView.js";
 import { TaskTimeline } from "./components/TaskTimeline.js";
 import { ResultPanel } from "./components/ResultPanel.js";
+
+type BoardView = "galaxy" | "list";
 
 export default function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [runs, setRuns] = useState<RunRecord[]>([]);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [view, setView] = useState<BoardView>(() => (localStorage.getItem("boardView") as BoardView) || "galaxy");
   const state = useRunSocket(selectedId);
+
+  const setViewAndPersist = (v: BoardView) => {
+    setView(v);
+    localStorage.setItem("boardView", v);
+  };
 
   const refreshHistory = useCallback(() => {
     listRuns()
@@ -64,14 +73,34 @@ export default function App() {
             {submitError && <div className="text-sm text-rose-300">{submitError}</div>}
           </div>
         ) : (
-          <div className="mx-auto max-w-4xl px-6 py-8">
+          <div className="mx-auto max-w-5xl px-6 py-8">
             {state.loading && !state.run && <div className="text-sm text-white/40">Loading run…</div>}
             {state.error && <div className="text-sm text-rose-300">{state.error}</div>}
             {state.run && (
               <>
                 <RunHeader run={state.run} connected={state.connected} />
                 <div className="mb-6">
-                  <TeamBoard run={state.run} tasks={state.tasks} />
+                  <div className="mb-2 flex justify-end">
+                    <div className="glass inline-flex rounded-lg border border-white/10 p-0.5 text-xs">
+                      <button
+                        onClick={() => setViewAndPersist("galaxy")}
+                        className={`rounded-md px-3 py-1.5 transition ${view === "galaxy" ? "bg-white/10 text-white" : "text-white/40 hover:text-white/70"}`}
+                      >
+                        ✨ Galaxy
+                      </button>
+                      <button
+                        onClick={() => setViewAndPersist("list")}
+                        className={`rounded-md px-3 py-1.5 transition ${view === "list" ? "bg-white/10 text-white" : "text-white/40 hover:text-white/70"}`}
+                      >
+                        List
+                      </button>
+                    </div>
+                  </div>
+                  {view === "galaxy" ? (
+                    <GalaxyView run={state.run} tasks={state.tasks} />
+                  ) : (
+                    <TeamBoard run={state.run} tasks={state.tasks} />
+                  )}
                 </div>
                 <div className="mb-6">
                   <div className="mb-2 text-xs font-medium uppercase tracking-wide text-white/35">Task activity</div>

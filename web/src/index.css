@@ -97,3 +97,49 @@ body {
   text-decoration: underline;
   text-underline-offset: 2px;
 }
+
+/* --- Galaxy view --------------------------------------------------------------- */
+
+@keyframes twinkle {
+  0%, 100% { opacity: var(--twinkle-min, 0.15); }
+  50% { opacity: var(--twinkle-max, 0.9); }
+}
+.star-twinkle {
+  animation: twinkle var(--twinkle-duration, 3s) ease-in-out infinite;
+  animation-delay: var(--twinkle-delay, 0s);
+}
+
+@keyframes galaxySpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.galaxy-ring-spin {
+  animation: galaxySpin 90s linear infinite;
+}
+.galaxy-ring-spin-rev {
+  animation: galaxySpin 130s linear infinite reverse;
+}
+
+@keyframes orbitFlow {
+  to { stroke-dashoffset: -24; }
+}
+.orbit-flow {
+  stroke-dasharray: 3 5;
+  animation: orbitFlow 1s linear infinite;
+}
+
+@keyframes sunPulse {
+  0%, 100% { filter: drop-shadow(0 0 14px rgba(246, 198, 108, 0.55)); }
+  50% { filter: drop-shadow(0 0 26px rgba(246, 198, 108, 0.9)); }
+}
+.sun-pulse {
+  animation: sunPulse 2.2s ease-in-out infinite;
+}
+
+@keyframes planetPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+}
+.planet-pulse {
+  animation: planetPulse 1.4s ease-in-out infinite;
+}
