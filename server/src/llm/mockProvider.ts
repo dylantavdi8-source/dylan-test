@@ -2,10 +2,11 @@ import type { ChatMessage, ContentBlock, ToolDefinition, LlmResponse } from "./c
 
 // A deterministic, clearly-labeled stand-in for the real Claude API, used automatically
 // when ANTHROPIC_API_KEY is not configured. It lets the *entire* orchestration engine
-// (planning, task graph execution, handoffs, sandboxed file writes, real command
-// execution for QA, retry-on-failure, guardrails) be exercised and verified for real --
-// only the "what would the model decide" step is simulated. Tool execution itself
-// (file IO, running commands) is always real, never faked, in both modes.
+// (planning, task graph execution, handoffs, real eBay tool calls against the mock eBay
+// store, retry-on-real-failure, guardrails) be exercised and verified for real -- only
+// the "what would the model decide" step is simulated. Tool execution itself (the eBay
+// client calls) is always real against whichever eBay client is active (mock or live),
+// never faked, in both LLM modes.
 
 function textOf(msg: ChatMessage | undefined): string {
   if (!msg) return "";
@@ -50,101 +51,89 @@ function agentRole(system: string): string {
   return m ? m[1] : "unknown";
 }
 
-const CODING_KEYWORDS = ["build", "code", "script", "program", "function", "implement", "app", "api", "bot", "algorithm", "write a", "create a tool", "develop"];
-const DESIGN_KEYWORDS = ["design", "ui", "ux", "interface", "layout", "mockup", "wireframe", "landing page", "visual"];
-const RESEARCH_KEYWORDS = ["research", "compare", "investigate", "find out", "summarize", "pros and cons", "learn about", "what are the best", "options for"];
+function lastToolResultJson(messages: ChatMessage[]): any {
+  const results = toolResultsOf(messages[messages.length - 1]);
+  try {
+    return JSON.parse(results[0]?.content ?? "{}");
+  } catch {
+    return {};
+  }
+}
+
+const LISTING_KEYWORDS = ["list a", "listing", "publish", "new item", "add a product", "sell a", "create an item", "relist"];
+const PRICING_KEYWORDS = ["price", "pricing", "reprice", "discount", "cheaper", "raise the price", "lower the price", "competitor", "market rate", "undercut"];
+const INVENTORY_KEYWORDS = ["inventory", "stock", "quantity", "restock", "out of stock", "sold out", "how many", "units left"];
+const MESSAGES_KEYWORDS = ["message", "buyer", "question", "reply", "respond to", "customer", "inbox"];
 
 function matchesAny(text: string, keywords: string[]): boolean {
   const lower = text.toLowerCase();
+  // Word-boundary matching, not a plain substring check -- a bare .includes() would let
+  // e.g. "listing" false-match inside "comparable listings" (a pricing/search phrase, not
+  // a listing-creation one). \b correctly does NOT match "listing" inside "listings" since
+  // both the 'g' and the following 's' are word characters (no boundary between them).
   return keywords.some((k) => {
     const escaped = k.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     return new RegExp(`\\b${escaped}\\b`).test(lower);
   });
 }
 
+// The demo scenario's SKUs, matching ebay/mockClient.ts's seed data.
+const DEMO_PRICING_SKU = "MOCK-CHGR-USBC-02"; // floorPrice 12.00, currently 19.50
+const DEMO_INVENTORY_SKU = "MOCK-STAND-TAB-03"; // currently active with 0 quantity
+
 function planFor(prompt: string) {
-  const needsCoding = matchesAny(prompt, CODING_KEYWORDS);
-  const needsDesign = matchesAny(prompt, DESIGN_KEYWORDS);
-  const needsResearch = matchesAny(prompt, RESEARCH_KEYWORDS);
+  const needsListing = matchesAny(prompt, LISTING_KEYWORDS);
+  const needsPricing = matchesAny(prompt, PRICING_KEYWORDS);
+  const needsInventory = matchesAny(prompt, INVENTORY_KEYWORDS);
+  const needsMessages = matchesAny(prompt, MESSAGES_KEYWORDS);
 
   const tasks: any[] = [];
-  if (needsResearch) {
+  if (needsListing) {
     tasks.push({
-      id: "research-1",
-      title: "Research background context",
-      agent_role: "research",
-      instructions: `Gather and summarize the background/context needed for this request: "${prompt}"`,
+      id: "listing-1",
+      title: "Handle the listing request",
+      agent_role: "listing",
+      instructions: `Handle this listing request against the seller's eBay account: "${prompt}"`,
       depends_on: [],
     });
   }
-  if (needsDesign) {
+  if (needsPricing) {
     tasks.push({
-      id: "design-1",
-      title: "Produce UI/UX design spec",
-      agent_role: "design",
-      instructions: `Produce a concise UI/UX design spec (and starter markup/CSS if relevant) for: "${prompt}"`,
-      depends_on: needsResearch ? ["research-1"] : [],
+      id: "pricing-1",
+      title: "Research and update pricing",
+      agent_role: "pricing",
+      instructions: `Handle this pricing request against the seller's eBay account: "${prompt}"`,
+      depends_on: [],
     });
   }
-  if (needsCoding) {
+  if (needsInventory) {
     tasks.push({
-      id: "coding-1",
-      title: "Implement the solution",
-      agent_role: "coding",
-      instructions: `Write working code in the shared workspace that fulfills: "${prompt}"`,
-      depends_on: [...(needsResearch ? ["research-1"] : []), ...(needsDesign ? ["design-1"] : [])],
+      id: "inventory-1",
+      title: "Check and update inventory",
+      agent_role: "inventory",
+      instructions: `Handle this inventory request against the seller's eBay account: "${prompt}"`,
+      depends_on: [],
     });
+  }
+  if (needsMessages) {
     tasks.push({
-      id: "testing-1",
-      title: "Test the implementation",
-      agent_role: "testing",
-      instructions: `Actually execute the code written for coding-1 and verify it works. Flag coding-1 with a specific, actionable message if it fails.`,
-      depends_on: ["coding-1"],
+      id: "messages-1",
+      title: "Handle buyer messages",
+      agent_role: "messages",
+      instructions: `Handle this buyer-message request against the seller's eBay account: "${prompt}"`,
+      depends_on: [],
     });
   }
   if (tasks.length > 0) {
     tasks.push({
-      id: "review-1",
-      title: "Final review",
-      agent_role: "review",
-      instructions: `Do a final holistic review of all completed work against the original request: "${prompt}". Confirm QA evidence is real before approving.`,
+      id: "compliance-1",
+      title: "Compliance review",
+      agent_role: "compliance",
+      instructions: `Verify all completed work against the original request: "${prompt}". Confirm every reported eBay action really happened (or was honestly reported as a dry run) before approving.`,
       depends_on: tasks.map((t) => t.id),
     });
   }
   return tasks;
-}
-
-function mockCoding(retry: boolean): string {
-  // Attempt 1 ships with a real, deliberate bug so QA has something genuine to catch;
-  // the retry attempt (triggered by a real flag_issue from testing) fixes it for real.
-  if (!retry) {
-    return `// mock-generated (attempt 1) -- intentionally buggy so QA can genuinely catch it
-function add(a, b) {
-  return a - b; // BUG: should be a + b
-}
-
-const result = add(2, 3);
-console.log("2 + 2 =", result);
-if (result !== 5) {
-  console.error("FAIL: expected 5, got " + result);
-  process.exit(1);
-}
-console.log("PASS");
-`;
-  }
-  return `// mock-generated (retry) -- bug fixed in response to real QA failure feedback
-function add(a, b) {
-  return a + b;
-}
-
-const result = add(2, 3);
-console.log("2 + 2 =", result);
-if (result !== 5) {
-  console.error("FAIL: expected 5, got " + result);
-  process.exit(1);
-}
-console.log("PASS");
-`;
 }
 
 export async function mockComplete(params: { system: string; messages: ChatMessage[]; tools: ToolDefinition[] }): Promise<LlmResponse> {
@@ -153,124 +142,176 @@ export async function mockComplete(params: { system: string; messages: ChatMessa
   const turn = assistantTurnCount(params.messages);
   const context = firstUserText(params.messages);
   const isRetry = /## Retry feedback/.test(context);
-  const lastToolResults = toolResultsOf(params.messages[params.messages.length - 1]);
-  const lastToolUses = lastAssistantToolUses(params.messages);
+  const lastResult = lastToolResultJson(params.messages);
 
+  // ---------------------------------------------------------------- manager: planning
   if (role === "manager" && has(tools, "create_plan")) {
     const promptMatch = context.match(/## User request\n([\s\S]*?)\n\n/);
     const prompt = promptMatch ? promptMatch[1].trim() : context.trim();
     const tasks = planFor(prompt);
     if (tasks.length === 0) {
       return respond(
-        "This looks simple enough to answer directly without spinning up the team.",
+        "This looks like a simple question I can answer directly without spinning up the team.",
         [{ name: "create_plan", input: { tasks: [], direct_answer: `[MOCK MODE - no ANTHROPIC_API_KEY set, so this is a deterministic placeholder, not a real reasoned answer] You asked: "${prompt}". Configure ANTHROPIC_API_KEY for a real answer from the manager agent.` } }]
       );
     }
     return respond(`Breaking this down across ${tasks.map((t) => t.agent_role).join(", ")}.`, [{ name: "create_plan", input: { tasks } }]);
   }
 
+  // ---------------------------------------------------------------- manager: finalize
   if (role === "manager" && has(tools, "finish_run")) {
     const sections = [...context.matchAll(/### (.+?)\n([\s\S]*?)(?=\n### |\n## |\n*$)/g)];
     const lines = sections.map(([, header, body]) => `**${header.trim()}**\n${body.trim()}`);
-    const testedOk = /EXIT CODE: 0/.test(context);
-    const testedFail = /EXIT CODE: [1-9]/.test(context) && !testedOk;
-    let verdict = "";
-    if (/testing/i.test(context)) {
-      verdict = testedOk
-        ? "\n\n_QA actually executed the code and it passed (see exit code evidence above)._"
-        : testedFail
-        ? "\n\n_Note: QA execution evidence shows a non-zero exit code was observed at some point; see task history for how it was resolved._"
-        : "";
-    }
-    const final = `## Result\n\n${lines.join("\n\n")}${verdict}\n\n_(MOCK MODE: no ANTHROPIC_API_KEY configured, so this summary was assembled deterministically from the real task outputs above rather than written by a real model. Set ANTHROPIC_API_KEY for real agent reasoning.)_`;
+    const anyDryRun = /"dryRun":\s*true/.test(context);
+    const anyRejected = /"ok":\s*false/.test(context);
+    let note = "";
+    if (anyDryRun) note += "\n\n_Note: at least one action above ran as a DRY RUN (EBAY_LIVE_MODE is not enabled) -- nothing was actually changed on eBay for that step._";
+    if (anyRejected) note += "\n\n_Note: at least one action was rejected by eBay/the mock store (e.g. a floor-price guard); see the task history for how it was resolved._";
+    const final = `## Result\n\n${lines.join("\n\n")}${note}\n\n_(MOCK MODE: no ANTHROPIC_API_KEY configured, so this summary was assembled deterministically from the real task outputs above rather than written by a real model. Set ANTHROPIC_API_KEY for real agent reasoning.)_`;
     return respond("All required work is complete and reviewed; finalizing.", [{ name: "finish_run", input: { final_result: final } }]);
   }
 
-  if (role === "research") {
-    const assignment = context.match(/## Your assignment: (.+)/)?.[1] ?? "the research task";
-    return respond("", [
-      {
-        name: "finish_task",
-        input: {
-          summary: "Synthesized background context for the team.",
-          output: `[MOCK research findings for "${assignment}"] No live web access was used (no ANTHROPIC_API_KEY / search provider configured for this run). Key considerations noted for downstream agents: scope the implementation narrowly, favor a dependency-free approach so it can be tested with plain \`node\`, and keep the surface area small.`,
-        },
-      },
-    ]);
-  }
-
-  if (role === "design") {
+  // ---------------------------------------------------------------------- listing
+  if (role === "listing") {
     if (turn === 0) {
-      return respond("Writing the design spec to the workspace.", [
-        { name: "write_file", input: { path: "design/spec.md", content: "# Design Spec (mock)\n\n- Minimal, single-purpose interface\n- Clear primary action\n- Real-time status feedback\n" } },
-      ]);
-    }
-    return respond("", [{ name: "finish_task", input: { summary: "Wrote UI/UX spec.", output: "design/spec.md written to the workspace with a minimal interface spec." } }]);
-  }
-
-  if (role === "coding") {
-    if (turn === 0) {
-      return respond("Implementing and writing app.js to the workspace.", [
-        { name: "write_file", input: { path: "app.js", content: mockCoding(isRetry) } },
-      ]);
-    }
-    return respond("", [
-      {
-        name: "finish_task",
-        input: {
-          summary: isRetry ? "Fixed the bug flagged by QA and rewrote app.js." : "Implemented app.js.",
-          output: `app.js written to the workspace${isRetry ? " (corrected after QA flagged a real failure)" : ""}.`,
-        },
-      },
-    ]);
-  }
-
-  if (role === "testing") {
-    if (turn === 0) {
-      return respond("Listing workspace files before running anything.", [{ name: "list_files", input: {} }]);
+      return respond("Checking existing listings before making changes.", [{ name: "list_ebay_listings", input: {} }]);
     }
     if (turn === 1) {
-      let target = "app.js";
-      try {
-        const files = JSON.parse(lastToolResults[0]?.content ?? "[]") as { path: string }[];
-        const jsFile = files.find((f) => f.path.endsWith(".js"));
-        if (jsFile) target = jsFile.path;
-      } catch {
-        /* fall back to default */
+      const wantsNew = /create|new item|new listing|add a product|sell a/i.test(context);
+      if (wantsNew) {
+        return respond("Creating the new listing.", [
+          {
+            name: "create_ebay_listing",
+            input: {
+              title: "[MOCK] New Item - Listed by AI Team",
+              description: "[MOCK MODE] Placeholder description -- no ANTHROPIC_API_KEY configured, so no real product details were reasoned about. Configure ANTHROPIC_API_KEY for the listing agent to write a real, accurate listing from your instructions.",
+              category_id: "182097",
+              price: 19.99,
+              quantity: 5,
+            },
+          },
+        ]);
       }
-      return respond(`Executing ${target} for real to verify it works.`, [{ name: "run_command", input: { command: "node", args: [target] } }]);
-    }
-    // turn 2: react to the real run_command result
-    const result = lastToolResults[0]?.content ?? "";
-    let exitCode = 0;
-    try {
-      exitCode = JSON.parse(result).exitCode ?? 0;
-    } catch {
-      exitCode = /exit code: 0/i.test(result) ? 0 : 1;
-    }
-    const targetIdMatch = context.match(/- (coding-\S+) \(coding\)/);
-    const targetId = targetIdMatch ? targetIdMatch[1] : "coding-1";
-    if (exitCode !== 0) {
-      return respond("Real execution failed -- flagging the coding task with the actual error.", [
-        { name: "flag_issue", input: { target_task_id: targetId, message: `Running the code failed for real with a non-zero exit code. Raw output:\n${result}`, severity: "blocking" } },
-        { name: "finish_task", input: { summary: "Execution failed; flagged coding task for retry.", output: `EXIT CODE: ${exitCode}\n${result}` } },
+      const listings = lastResult.listings ?? [];
+      const target = listings[0]?.sku ?? DEMO_PRICING_SKU;
+      return respond("Updating the existing listing's details.", [
+        { name: "update_listing_details", input: { sku: target, description: "[MOCK MODE] Description refreshed by the listing agent (placeholder -- set ANTHROPIC_API_KEY for a real rewrite)." } },
       ]);
     }
-    return respond("Execution passed for real; marking QA complete.", [
-      { name: "finish_task", input: { summary: "Ran the code for real; it passed.", output: `EXIT CODE: ${exitCode}\n${result}` } },
+    return respond("", [
+      {
+        name: "finish_task",
+        input: {
+          summary: "Handled the listing request.",
+          output: `Tool result: ${JSON.stringify(lastResult)}`,
+        },
+      },
     ]);
   }
 
-  if (role === "review") {
+  // ---------------------------------------------------------------------- pricing
+  if (role === "pricing") {
     if (turn === 0) {
-      return respond("Reading the produced artifacts before signing off.", [{ name: "list_files", input: {} }]);
+      return respond(`Looking up the current listing before changing anything.`, [{ name: "get_ebay_listing", input: { sku: DEMO_PRICING_SKU } }]);
+    }
+    if (turn === 1) {
+      const title = lastResult.listing?.title ?? "the product";
+      return respond("Checking comparable listings for market context.", [{ name: "search_comparable_listings", input: { query: title, limit: 5 } }]);
+    }
+    if (turn === 2) {
+      // Attempt 1 deliberately undercuts below the floor price the mock store enforces,
+      // so compliance has a real, genuine rejection to catch -- mirroring how the original
+      // dev-team mock shipped a real bug on attempt 1 for QA to find for real.
+      const proposedPrice = isRetry ? 13.5 : 8.99;
+      return respond(
+        isRetry ? "Applying a corrected price that respects the floor." : "Applying a competitive price based on comparable listings.",
+        [{ name: "update_listing_price", input: { sku: DEMO_PRICING_SKU, price: proposedPrice } }]
+      );
     }
     return respond("", [
-      { name: "finish_task", input: { summary: "Reviewed all completed work against the original request; approved.", output: "Reviewed task outputs and QA evidence; no further issues found." } },
+      {
+        name: "finish_task",
+        input: {
+          summary: lastResult.ok ? "Updated the price." : "Price change was rejected by eBay's floor-price guard.",
+          output: `Tool result: ${JSON.stringify(lastResult)}`,
+        },
+      },
+    ]);
+  }
+
+  // ---------------------------------------------------------------------- inventory
+  if (role === "inventory") {
+    if (turn === 0) {
+      return respond("Reviewing current listings and stock levels.", [{ name: "list_ebay_listings", input: {} }]);
+    }
+    if (turn === 1) {
+      return respond("Checking recent order activity for demand context.", [{ name: "get_ebay_orders", input: { since_hours: 168 } }]);
+    }
+    if (turn === 2) {
+      const listings = (lastResult.orders ? [] : lastResult.listings) ?? [];
+      const zeroStock = listings.find((l: any) => l.quantity === 0);
+      const targetSku = zeroStock?.sku ?? DEMO_INVENTORY_SKU;
+      return respond(`Restocking ${targetSku}, which shows zero quantity.`, [{ name: "update_listing_quantity", input: { sku: targetSku, quantity: 10 } }]);
+    }
+    return respond("", [
+      { name: "finish_task", input: { summary: "Reviewed inventory and updated stock.", output: `Tool result: ${JSON.stringify(lastResult)}` } },
+    ]);
+  }
+
+  // ---------------------------------------------------------------------- messages
+  if (role === "messages") {
+    if (turn === 0) {
+      return respond("Checking for unanswered buyer messages.", [{ name: "get_buyer_messages", input: { unreplied_only: true } }]);
+    }
+    if (turn === 1) {
+      const msgs = lastResult.messages ?? [];
+      if (msgs.length === 0) {
+        return respond("", [{ name: "finish_task", input: { summary: "No unanswered buyer messages found.", output: "get_buyer_messages returned an empty list -- nothing to reply to." } }]);
+      }
+      const target = msgs[0];
+      return respond(`Replying to ${target.buyerUsername}'s question.`, [
+        {
+          name: "reply_to_buyer_message",
+          input: {
+            message_id: target.messageId,
+            body: `[MOCK MODE] Thanks for reaching out! This is a placeholder reply -- no ANTHROPIC_API_KEY is configured, so the messages agent could not reason about your actual question ("${target.body}"). Configure ANTHROPIC_API_KEY for a real, specific answer.`,
+          },
+        },
+      ]);
+    }
+    return respond("", [
+      { name: "finish_task", input: { summary: "Replied to the buyer message.", output: `Tool result: ${JSON.stringify(lastResult)}` } },
+    ]);
+  }
+
+  // ---------------------------------------------------------------------- compliance
+  if (role === "compliance") {
+    if (turn === 0) {
+      return respond("Verifying the actions taken against the live listing state.", [{ name: "get_ebay_listing", input: { sku: DEMO_PRICING_SKU } }]);
+    }
+    // Look for a real rejected price change in the dependency context -- if pricing's own
+    // reported output shows ok:false, that's a genuine defect to flag, not a stylistic one.
+    const pricingRejected = /pricing-1[\s\S]*?"ok":\s*false/.test(context) || /"ok":\s*false[\s\S]*?below the floor/i.test(context);
+    if (pricingRejected && !isRetry) {
+      return respond("Found a real problem: the price change was rejected by the floor-price guard.", [
+        {
+          name: "flag_issue",
+          input: {
+            target_task_id: "pricing-1",
+            message: "update_listing_price returned ok:false -- the proposed price was below this listing's floor price and was NOT applied. Propose a price at or above the floor and try again.",
+            severity: "blocking",
+          },
+        },
+        { name: "finish_task", input: { summary: "Flagged a real pricing defect for retry.", output: "pricing-1's price change was rejected by eBay's floor-price guard; sent back with specific feedback." } },
+      ]);
+    }
+    return respond("", [
+      { name: "finish_task", input: { summary: "Reviewed all completed work against the original request; approved.", output: `Verified via get_ebay_listing: ${JSON.stringify(lastResult)}. No further issues found.` } },
     ]);
   }
 
   // Fallback: should not normally be reached.
+  const lastToolUses = lastAssistantToolUses(params.messages);
   if (lastToolUses.length > 0 || has(tools, "finish_task")) {
     return respond("", [{ name: "finish_task", input: { summary: "Completed (mock fallback).", output: "No specific mock behavior matched; completed with a generic result." } }]);
   }

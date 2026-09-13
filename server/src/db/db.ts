@@ -20,6 +20,8 @@ CREATE TABLE IF NOT EXISTS runs (
   final_result TEXT,
   workspace_dir TEXT,
   llm_mode TEXT NOT NULL,
+  ebay_mode TEXT NOT NULL DEFAULT 'mock',
+  ebay_live_actions INTEGER NOT NULL DEFAULT 0,
   error TEXT
 );
 
@@ -65,6 +67,8 @@ function rowToRun(row: any): RunRecord {
     finalResult: row.final_result,
     workspaceDir: row.workspace_dir,
     llmMode: row.llm_mode,
+    ebayMode: row.ebay_mode,
+    ebayLiveActions: !!row.ebay_live_actions,
     error: row.error,
   };
 }
@@ -103,8 +107,8 @@ function rowToEvent(row: any): RunEvent {
 export const store = {
   createRun(run: RunRecord) {
     db.prepare(
-      `INSERT INTO runs (id, prompt, status, created_at, updated_at, final_result, workspace_dir, llm_mode, error)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO runs (id, prompt, status, created_at, updated_at, final_result, workspace_dir, llm_mode, ebay_mode, ebay_live_actions, error)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       run.id,
       run.prompt,
@@ -114,6 +118,8 @@ export const store = {
       run.finalResult,
       run.workspaceDir,
       run.llmMode,
+      run.ebayMode,
+      run.ebayLiveActions ? 1 : 0,
       run.error
     );
   },

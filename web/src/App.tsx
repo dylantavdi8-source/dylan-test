@@ -53,10 +53,11 @@ export default function App() {
         {!selectedId ? (
           <div className="flex h-full flex-col items-center justify-center gap-6 px-6">
             <div className="text-center">
-              <h1 className="text-3xl font-bold tracking-tight text-white">Your AI Team</h1>
+              <h1 className="text-3xl font-bold tracking-tight text-white">Your eBay Team</h1>
               <p className="mt-2 max-w-md text-sm text-white/45">
-                One request in. A manager agent delegates to research, coding, design, testing, and review
-                specialists who hand off work, catch each other's mistakes, and hand you back one verified result.
+                One request in. A manager agent delegates to listing, pricing, inventory, and messages
+                specialists who work your real eBay account, get double-checked by compliance, and hand
+                you back one honest result.
               </p>
             </div>
             <PromptInput onSubmit={handleSubmit} disabled={false} />

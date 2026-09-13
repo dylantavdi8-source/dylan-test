@@ -1,4 +1,4 @@
-export type AgentRole = "manager" | "research" | "coding" | "design" | "testing" | "review";
+export type AgentRole = "manager" | "listing" | "pricing" | "inventory" | "messages" | "compliance";
 export type RunStatus = "planning" | "running" | "completed" | "failed";
 export type TaskStatus = "pending" | "running" | "blocked" | "needs_retry" | "completed" | "failed";
 
@@ -11,6 +11,8 @@ export interface RunRecord {
   finalResult: string | null;
   workspaceDir: string | null;
   llmMode: "live" | "mock";
+  ebayMode: "live" | "mock";
+  ebayLiveActions: boolean;
   error: string | null;
 }
 

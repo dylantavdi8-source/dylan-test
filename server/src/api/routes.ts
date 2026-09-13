@@ -4,13 +4,15 @@ import { store } from "../db/db.js";
 import { startRun } from "../orchestrator/engine.js";
 import { listWorkspaceFiles, readWorkspaceFile } from "../sandbox/workspace.js";
 import { getLlmProvider } from "../llm/client.js";
+import { getEbayClient } from "../ebay/index.js";
 
 export const router = Router();
 
 const CreateRunInput = z.object({ prompt: z.string().min(1).max(20000) });
 
 router.get("/health", (_req, res) => {
-  res.json({ ok: true, llmMode: getLlmProvider().mode });
+  const ebay = getEbayClient();
+  res.json({ ok: true, llmMode: getLlmProvider().mode, ebayMode: ebay.mode, ebayLiveActions: ebay.liveActionsEnabled });
 });
 
 router.post("/runs", async (req, res) => {

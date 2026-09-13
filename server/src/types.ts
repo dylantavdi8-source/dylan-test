@@ -2,11 +2,11 @@
 
 export type AgentRole =
   | "manager"
-  | "research"
-  | "coding"
-  | "design"
-  | "testing"
-  | "review";
+  | "listing"
+  | "pricing"
+  | "inventory"
+  | "messages"
+  | "compliance";
 
 export type RunStatus =
   | "planning"
@@ -31,6 +31,8 @@ export interface RunRecord {
   finalResult: string | null;
   workspaceDir: string | null;
   llmMode: "live" | "mock";
+  ebayMode: "live" | "mock";
+  ebayLiveActions: boolean;
   error: string | null;
 }
 

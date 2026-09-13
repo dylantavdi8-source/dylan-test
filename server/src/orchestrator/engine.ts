@@ -2,6 +2,7 @@ import { nanoid } from "nanoid";
 import { store } from "../db/db.js";
 import { createWorkspace } from "../sandbox/workspace.js";
 import { getLlmProvider } from "../llm/client.js";
+import { getEbayClient } from "../ebay/index.js";
 import {
   toolsForRole,
   TOOL_SCHEMAS,
@@ -13,7 +14,7 @@ import {
 } from "../llm/tools.js";
 import { buildSystemPrompt, agentDef } from "../agents/registry.js";
 import { buildPlanningContext, buildFinalizeContext, buildTaskContext } from "./contextBuilder.js";
-import { executeWorkspaceTool } from "./toolExecutor.js";
+import { executeEbayTool } from "./toolExecutor.js";
 import { runToolLoop } from "./agentRunner.js";
 import { RunGuardrails } from "./guardrails.js";
 import { publish } from "../ws/hub.js";
@@ -32,6 +33,7 @@ export async function startRun(prompt: string): Promise<string> {
   const runId = nanoid();
   const now = Date.now();
   const llm = getLlmProvider();
+  const ebay = getEbayClient();
   const workspaceDir = createWorkspace(runId);
 
   const run: RunRecord = {
@@ -43,18 +45,24 @@ export async function startRun(prompt: string): Promise<string> {
     finalResult: null,
     workspaceDir,
     llmMode: llm.mode,
+    ebayMode: ebay.mode,
+    ebayLiveActions: ebay.liveActionsEnabled,
     error: null,
   };
   store.createRun(run);
+
+  const modeNotes: string[] = [];
+  if (llm.mode === "mock") modeNotes.push("MOCK MODE: no ANTHROPIC_API_KEY is configured, so agent decisions are simulated deterministically.");
+  if (ebay.mode === "mock") modeNotes.push("MOCK EBAY: no eBay credentials configured, so listings/orders/messages are a simulated in-memory store, not a real account.");
+  else if (!ebay.liveActionsEnabled) modeNotes.push("DRY RUN: real eBay credentials are configured, but EBAY_LIVE_MODE is not \"true\" -- listing/price/quantity/message changes will be simulated and reported as such, not actually sent to eBay.");
+
   emit(
     runId,
     null,
     "run.created",
     null,
-    llm.mode === "mock"
-      ? "Run created. MOCK MODE: no ANTHROPIC_API_KEY is configured, so agent decisions are simulated deterministically -- tool execution (files, commands) is still 100% real."
-      : "Run created.",
-    { llmMode: llm.mode }
+    modeNotes.length ? `Run created. ${modeNotes.join(" ")}` : "Run created. Live mode: real agent reasoning against your real eBay account.",
+    { llmMode: llm.mode, ebayMode: ebay.mode, ebayLiveActions: ebay.liveActionsEnabled }
   );
 
   executeRun(runId, prompt, workspaceDir).catch((err) => {
@@ -148,7 +156,7 @@ async function runManagerPlanning(
     maxTurns: agentDef("manager").maxToolTurns,
     terminalToolNames: ["create_plan"],
     guardrails,
-    executeTool: async (name, input) => executeWorkspaceTool(workspaceDirNotUsed(), name, input),
+    executeTool: async (name, input) => executeEbayTool(name, input),
     onToolUse: (tu) => emit(runId, null, "task.tool_call", "manager", `Manager called ${tu.name}`, tu),
   });
 
@@ -187,7 +195,7 @@ async function runManagerFinalize(runId: string, prompt: string, tasks: TaskReco
     maxTurns: agentDef("manager").maxToolTurns,
     terminalToolNames: ["finish_run"],
     guardrails,
-    executeTool: async (name, input) => executeWorkspaceTool(workspaceDirNotUsed(), name, input),
+    executeTool: async (name, input) => executeEbayTool(name, input),
     onToolUse: (tu) => emit(runId, null, "task.tool_call", "manager", `Manager called ${tu.name}`, tu),
   });
 
@@ -207,12 +215,6 @@ function buildFallbackSummary(completed: TaskRecord[], failed: TaskRecord[]): st
     ...(lines.length ? lines : ["(none)"]),
     ...(failLines.length ? ["", "## Failed", ...failLines] : []),
   ].join("\n");
-}
-
-function workspaceDirNotUsed(): string {
-  // create_plan / finish_run never touch the filesystem; executeWorkspaceTool only uses
-  // this for write_file/read_file/list_files/run_command, none of which those two tools are.
-  return "";
 }
 
 // ---------------------------------------------------------------------------
@@ -300,7 +302,7 @@ async function runSingleTask(runId: string, prompt: string, workspaceDir: string
         }
         return JSON.stringify({ ok: true, acknowledged: "flag_issue" });
       }
-      return executeWorkspaceTool(workspaceDir, name, input);
+      return executeEbayTool(name, input);
     },
     onToolUse: (tu) => emit(runId, task.id, "task.tool_call", task.agentRole, `${agentDef(task.agentRole).displayName} called ${tu.name}`, tu),
   });

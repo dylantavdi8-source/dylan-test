@@ -1,9 +1,10 @@
 import { useState } from "react";
 
 const EXAMPLES = [
-  "Build a script that validates email addresses and test it",
-  "Research the best caching strategy for a Node API and design the interface",
-  "Build a landing page for a productivity app",
+  "Check for new buyer messages and reply to anything unanswered",
+  "Our USB-C charger is selling fast -- check current price against comparable listings and reprice it competitively",
+  "The tablet stand shows 0 quantity -- check recent orders and restock it",
+  "List a new item: wireless earbuds case, category electronics accessories, $12.99, qty 20",
 ];
 
 export function PromptInput({ onSubmit, disabled }: { onSubmit: (prompt: string) => void; disabled: boolean }) {
@@ -28,7 +29,7 @@ export function PromptInput({ onSubmit, disabled }: { onSubmit: (prompt: string)
               submit();
             }
           }}
-          placeholder="Describe what you want your AI team to do..."
+          placeholder="Tell your eBay team what to do..."
           rows={3}
           disabled={disabled}
           className="w-full resize-none bg-transparent px-4 py-3 text-[15px] text-white placeholder-white/35 outline-none disabled:opacity-50"

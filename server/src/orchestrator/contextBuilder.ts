@@ -5,7 +5,7 @@ import type { TaskRecord } from "../types.js";
 // them in sync with server/src/llm/mockProvider.ts if you change them.
 
 export function buildPlanningContext(prompt: string): string {
-  return `## User request\n${prompt}\n\nDecide which specialist agents are actually needed (research, coding, design, testing, review) and create a task plan with create_plan, or set direct_answer if this needs no specialist work.`;
+  return `## User request\n${prompt}\n\nDecide which specialist agents are actually needed (listing, pricing, inventory, messages, compliance) and create a task plan with create_plan, or set direct_answer if this needs no specialist work.`;
 }
 
 export function buildFinalizeContext(

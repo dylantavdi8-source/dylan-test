@@ -3,7 +3,7 @@ import { AGENT_META } from "../lib/meta.js";
 
 export type AgentBoardStatus = "idle" | "working" | "retrying" | "done" | "failed";
 
-function deriveStatus(tasks: TaskRecord[]): AgentBoardStatus {
+export function deriveStatus(tasks: TaskRecord[]): AgentBoardStatus {
   if (tasks.some((t) => t.status === "running")) return "working";
   if (tasks.some((t) => t.status === "needs_retry" || t.status === "blocked")) return "retrying";
   if (tasks.length === 0) return "idle";
@@ -12,42 +12,48 @@ function deriveStatus(tasks: TaskRecord[]): AgentBoardStatus {
   return "idle";
 }
 
-const STATUS_STYLE: Record<AgentBoardStatus, { label: string; ring: string; dot: string }> = {
-  idle: { label: "Idle", ring: "border-white/10", dot: "bg-white/25" },
-  working: { label: "Working", ring: "border-accent-500/50", dot: "bg-accent-400 animate-pulseSoft" },
-  retrying: { label: "Retrying", ring: "border-amber-500/50", dot: "bg-amber-400 animate-pulseSoft" },
-  done: { label: "Done", ring: "border-emerald-500/40", dot: "bg-emerald-400" },
-  failed: { label: "Failed", ring: "border-rose-500/40", dot: "bg-rose-400" },
+const STATUS_STYLE: Record<AgentBoardStatus, { label: string; ring: string; dot: string; text: string }> = {
+  idle: { label: "Idle", ring: "border-white/10", dot: "bg-white/25", text: "text-white/40" },
+  working: { label: "Working", ring: "border-accent-500/50", dot: "bg-accent-400 animate-pulseSoft", text: "text-accent-300" },
+  retrying: { label: "Retrying", ring: "border-amber-500/50", dot: "bg-amber-400 animate-pulseSoft", text: "text-amber-300" },
+  done: { label: "Done", ring: "border-emerald-500/40", dot: "bg-emerald-400", text: "text-emerald-300" },
+  failed: { label: "Failed", ring: "border-rose-500/40", dot: "bg-rose-400", text: "text-rose-300" },
 };
 
-export function AgentCard({ role, tasks }: { role: AgentRole; tasks: TaskRecord[] }) {
+export function currentTaskFor(tasks: TaskRecord[]): TaskRecord | undefined {
+  return tasks.find((t) => t.status === "running") ?? tasks.find((t) => t.status === "needs_retry" || t.status === "blocked");
+}
+
+/** A compact roster row for the left-hand worker list. */
+export function AgentCard({ role, tasks, active }: { role: AgentRole; tasks: TaskRecord[]; active?: boolean }) {
   const meta = AGENT_META[role];
+  const Icon = meta.icon;
   const status = deriveStatus(tasks);
   const style = STATUS_STYLE[status];
-  const current = tasks.find((t) => t.status === "running") ?? tasks.find((t) => t.status === "needs_retry" || t.status === "blocked");
-  const active = status === "working" || status === "retrying";
+  const current = currentTaskFor(tasks);
+  const isActive = active ?? (status === "working" || status === "retrying");
 
   return (
     <div
-      className={`glass relative rounded-xl border p-3.5 transition-all ${style.ring} ${active ? "shadow-glow" : ""}`}
+      className={`glass relative flex items-center gap-3 rounded-xl border p-3 transition-all ${style.ring} ${
+        isActive ? "shadow-glow bg-white/[0.04]" : ""
+      }`}
     >
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span
-            className="flex h-7 w-7 items-center justify-center rounded-lg text-[10px] font-bold text-black/80"
-            style={{ background: meta.color }}
-          >
-            {meta.short}
+      <span
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
+        style={{ background: `${meta.color}22`, color: meta.color }}
+      >
+        <Icon size={18} strokeWidth={2.25} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center justify-between gap-2">
+          <span className="truncate text-sm font-medium text-white/90">{meta.label}</span>
+          <span className={`flex shrink-0 items-center gap-1.5 text-[10px] ${style.text}`}>
+            <span className={`h-1.5 w-1.5 rounded-full ${style.dot}`} />
+            {style.label}
           </span>
-          <span className="text-sm font-medium text-white/90">{meta.label}</span>
         </div>
-        <span className="flex items-center gap-1.5 text-[11px] text-white/45">
-          <span className={`h-1.5 w-1.5 rounded-full ${style.dot}`} />
-          {style.label}
-        </span>
-      </div>
-      <div className="mt-2 min-h-[2.2em] text-xs leading-snug text-white/55">
-        {current ? current.title : tasks.length === 0 ? "Not needed for this request" : "Waiting"}
+        <div className="truncate text-[11px] text-white/40">{current ? current.title : tasks.length === 0 ? meta.blurb : "Waiting"}</div>
       </div>
     </div>
   );

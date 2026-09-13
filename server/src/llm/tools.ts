@@ -6,13 +6,16 @@ import type { AgentRole } from "../types.js";
 // plus a matching zod schema used to validate/parse the model's tool_use input at
 // runtime (models occasionally emit malformed input; we never trust it blindly).
 
+const AGENT_ROLE_ENUM = ["listing", "pricing", "inventory", "messages", "compliance"] as const;
+
 export const TOOL_SCHEMAS: Record<string, ToolDefinition> = {
   create_plan: {
     name: "create_plan",
     description:
       "Break the user's request into a task graph assigned to specialist agents. Only include agents that are actually needed " +
-      "for this request -- do not add research/design/testing tasks the request doesn't call for. If the request is trivial " +
-      "enough to answer directly with no specialist work (e.g. a simple factual question), leave tasks empty and set direct_answer instead.",
+      "for this request -- do not add a compliance task the request doesn't call for. If the request is trivial enough to " +
+      "answer directly with no specialist work (e.g. a simple factual question you already have the answer to), leave tasks " +
+      "empty and set direct_answer instead.",
     input_schema: {
       type: "object",
       properties: {
@@ -25,12 +28,9 @@ export const TOOL_SCHEMAS: Record<string, ToolDefinition> = {
           items: {
             type: "object",
             properties: {
-              id: { type: "string", description: "Short unique slug, e.g. 'research-1'" },
+              id: { type: "string", description: "Short unique slug, e.g. 'pricing-1'" },
               title: { type: "string" },
-              agent_role: {
-                type: "string",
-                enum: ["research", "coding", "design", "testing", "review"],
-              },
+              agent_role: { type: "string", enum: [...AGENT_ROLE_ENUM] },
               instructions: { type: "string", description: "Precise instructions for the assigned agent." },
               depends_on: {
                 type: "array",
@@ -46,60 +46,145 @@ export const TOOL_SCHEMAS: Record<string, ToolDefinition> = {
     },
   },
 
-  write_file: {
-    name: "write_file",
-    description: "Write (create or overwrite) a file in the shared project workspace.",
-    input_schema: {
-      type: "object",
-      properties: {
-        path: { type: "string", description: "Relative path within the workspace, e.g. 'src/index.js'" },
-        content: { type: "string" },
-      },
-      required: ["path", "content"],
-    },
-  },
+  // --- eBay read tools -------------------------------------------------------------
 
-  read_file: {
-    name: "read_file",
-    description: "Read a file from the shared project workspace.",
-    input_schema: {
-      type: "object",
-      properties: { path: { type: "string" } },
-      required: ["path"],
-    },
-  },
-
-  list_files: {
-    name: "list_files",
-    description: "List all files currently in the shared project workspace.",
+  list_ebay_listings: {
+    name: "list_ebay_listings",
+    description: "List all current listings in the seller's eBay account (SKU, title, price, quantity, status, floor price if set).",
     input_schema: { type: "object", properties: {} },
   },
 
-  run_command: {
-    name: "run_command",
-    description:
-      "Actually execute a real command in the workspace (e.g. to run a test suite or a script) and get back its real " +
-      "stdout, stderr, and exit code. Only a fixed allow-list of interpreters/test runners is permitted. You MUST use this " +
-      "tool to verify anything before claiming it works -- never report a test result you did not actually observe here.",
+  get_ebay_listing: {
+    name: "get_ebay_listing",
+    description: "Get full detail for one listing by SKU.",
+    input_schema: {
+      type: "object",
+      properties: { sku: { type: "string" } },
+      required: ["sku"],
+    },
+  },
+
+  search_comparable_listings: {
+    name: "search_comparable_listings",
+    description: "Search active eBay listings for comparable products, to get real market/competitor pricing context.",
     input_schema: {
       type: "object",
       properties: {
-        command: { type: "string", description: "The binary to run, e.g. 'node', 'npm', 'python3', 'pytest'." },
-        args: { type: "array", items: { type: "string" } },
+        query: { type: "string", description: "Search terms describing the product, e.g. '65W USB-C GaN charger'." },
+        limit: { type: "number", description: "Max results, default 5." },
       },
-      required: ["command", "args"],
+      required: ["query"],
     },
   },
+
+  get_ebay_orders: {
+    name: "get_ebay_orders",
+    description: "Get recent orders (for inventory/demand context).",
+    input_schema: {
+      type: "object",
+      properties: { since_hours: { type: "number", description: "How far back to look, default 168 (7 days)." } },
+    },
+  },
+
+  get_buyer_messages: {
+    name: "get_buyer_messages",
+    description: "Get buyer questions/messages sent to the seller.",
+    input_schema: {
+      type: "object",
+      properties: { unreplied_only: { type: "boolean", description: "Default true -- only messages not yet replied to." } },
+    },
+  },
+
+  // --- eBay write tools --------------------------------------------------------------
+  // Every one of these may run as a real action or a dry-run simulation depending on
+  // EBAY_LIVE_MODE -- the tool result always says which (ok/dryRun fields); report the
+  // real result, never assume it went live.
+
+  create_ebay_listing: {
+    name: "create_ebay_listing",
+    description: "Create and publish a new eBay listing.",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        description: { type: "string" },
+        category_id: { type: "string", description: "eBay category ID." },
+        price: { type: "number" },
+        quantity: { type: "number" },
+        sku: { type: "string", description: "Optional -- a SKU will be generated if omitted." },
+        floor_price: { type: "number", description: "Optional minimum price this listing should never go below." },
+      },
+      required: ["title", "description", "category_id", "price", "quantity"],
+    },
+  },
+
+  update_listing_details: {
+    name: "update_listing_details",
+    description: "Update a listing's title and/or description.",
+    input_schema: {
+      type: "object",
+      properties: {
+        sku: { type: "string" },
+        title: { type: "string" },
+        description: { type: "string" },
+      },
+      required: ["sku"],
+    },
+  },
+
+  update_listing_price: {
+    name: "update_listing_price",
+    description:
+      "Change a listing's price. May be rejected (ok:false) if it violates a floor price the seller has set -- that means the " +
+      "price was NOT changed; check the result before reporting success.",
+    input_schema: {
+      type: "object",
+      properties: { sku: { type: "string" }, price: { type: "number" } },
+      required: ["sku", "price"],
+    },
+  },
+
+  update_listing_quantity: {
+    name: "update_listing_quantity",
+    description: "Change a listing's available quantity.",
+    input_schema: {
+      type: "object",
+      properties: { sku: { type: "string" }, quantity: { type: "number" } },
+      required: ["sku", "quantity"],
+    },
+  },
+
+  end_ebay_listing: {
+    name: "end_ebay_listing",
+    description: "End (withdraw) an active listing.",
+    input_schema: {
+      type: "object",
+      properties: { sku: { type: "string" }, reason: { type: "string" } },
+      required: ["sku", "reason"],
+    },
+  },
+
+  reply_to_buyer_message: {
+    name: "reply_to_buyer_message",
+    description: "Send a reply to a buyer's message/question.",
+    input_schema: {
+      type: "object",
+      properties: { message_id: { type: "string" }, body: { type: "string" } },
+      required: ["message_id", "body"],
+    },
+  },
+
+  // --- generic control-flow tools (unchanged across any agent roster) ----------------
 
   handoff: {
     name: "handoff",
     description:
-      "Hand this task's work off to another specialist agent as a new follow-up task (e.g. coding hands off to testing " +
-      "once code is written). The target agent will receive your message plus everything produced so far.",
+      "Hand this task's work off to another specialist agent as a new follow-up task (e.g. listing hands off to pricing once a " +
+      "new item needs its initial price researched). The target agent will receive your message plus everything produced so far.",
     input_schema: {
       type: "object",
       properties: {
-        to_agent: { type: "string", enum: ["research", "coding", "design", "testing", "review"] },
+        to_agent: { type: "string", enum: [...AGENT_ROLE_ENUM] },
         message: { type: "string", description: "What you want the next agent to do, and any context they need." },
       },
       required: ["to_agent", "message"],
@@ -110,7 +195,7 @@ export const TOOL_SCHEMAS: Record<string, ToolDefinition> = {
     name: "flag_issue",
     description:
       "Reject/challenge another task's output because it has a problem. This sends that task back for a retry with your " +
-      "feedback attached. Use this when reviewing or testing reveals a real defect -- be specific about what is wrong.",
+      "feedback attached. Use this when compliance review (or your own work) reveals a real defect -- be specific about what is wrong.",
     input_schema: {
       type: "object",
       properties: {
@@ -129,7 +214,7 @@ export const TOOL_SCHEMAS: Record<string, ToolDefinition> = {
       type: "object",
       properties: {
         summary: { type: "string", description: "One or two sentence summary of what you did." },
-        output: { type: "string", description: "The full output/result of this task (code excerpt references, findings, verdict, etc.)." },
+        output: { type: "string", description: "The full output/result of this task (real tool results, findings, verdict, etc.)." },
       },
       required: ["summary", "output"],
     },
@@ -138,7 +223,7 @@ export const TOOL_SCHEMAS: Record<string, ToolDefinition> = {
   finish_run: {
     name: "finish_run",
     description:
-      "Only call this once all necessary work is complete and (if code was involved) has been reviewed and actually tested. " +
+      "Only call this once all necessary work is complete and (if any eBay action was taken) has been reviewed by compliance. " +
       "Produces the final polished response returned to the user.",
     input_schema: {
       type: "object",
@@ -151,12 +236,20 @@ export const TOOL_SCHEMAS: Record<string, ToolDefinition> = {
 };
 
 export const TOOLS_BY_ROLE: Record<AgentRole, string[]> = {
-  manager: ["create_plan", "list_files", "read_file", "flag_issue", "finish_run"],
-  research: ["read_file", "list_files", "write_file", "handoff", "finish_task"],
-  coding: ["write_file", "read_file", "list_files", "handoff", "finish_task"],
-  design: ["write_file", "read_file", "list_files", "handoff", "finish_task"],
-  testing: ["run_command", "read_file", "list_files", "flag_issue", "handoff", "finish_task"],
-  review: ["read_file", "list_files", "flag_issue", "handoff", "finish_task"],
+  manager: ["create_plan", "list_ebay_listings", "get_ebay_listing", "flag_issue", "finish_run"],
+  listing: [
+    "list_ebay_listings",
+    "get_ebay_listing",
+    "create_ebay_listing",
+    "update_listing_details",
+    "end_ebay_listing",
+    "handoff",
+    "finish_task",
+  ],
+  pricing: ["get_ebay_listing", "list_ebay_listings", "search_comparable_listings", "update_listing_price", "handoff", "finish_task"],
+  inventory: ["list_ebay_listings", "get_ebay_listing", "get_ebay_orders", "update_listing_quantity", "handoff", "finish_task"],
+  messages: ["get_buyer_messages", "get_ebay_listing", "reply_to_buyer_message", "handoff", "finish_task"],
+  compliance: ["get_ebay_listing", "list_ebay_listings", "get_ebay_orders", "flag_issue", "handoff", "finish_task"],
 };
 
 export function toolsForRole(role: AgentRole): ToolDefinition[] {
@@ -168,7 +261,7 @@ export function toolsForRole(role: AgentRole): ToolDefinition[] {
 export const PlanTaskSchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
-  agent_role: z.enum(["research", "coding", "design", "testing", "review"]),
+  agent_role: z.enum(AGENT_ROLE_ENUM),
   instructions: z.string().min(1),
   depends_on: z.array(z.string()).default([]),
 });
@@ -178,12 +271,8 @@ export const CreatePlanInput = z.object({
   tasks: z.array(PlanTaskSchema).default([]),
 });
 
-export const WriteFileInput = z.object({ path: z.string().min(1), content: z.string() });
-export const ReadFileInput = z.object({ path: z.string().min(1) });
-export const ListFilesInput = z.object({}).passthrough();
-export const RunCommandInput = z.object({ command: z.string().min(1), args: z.array(z.string()).default([]) });
 export const HandoffInput = z.object({
-  to_agent: z.enum(["research", "coding", "design", "testing", "review"]),
+  to_agent: z.enum(AGENT_ROLE_ENUM),
   message: z.string().min(1),
 });
 export const FlagIssueInput = z.object({
@@ -193,3 +282,26 @@ export const FlagIssueInput = z.object({
 });
 export const FinishTaskInput = z.object({ summary: z.string().min(1), output: z.string() });
 export const FinishRunInput = z.object({ final_result: z.string().min(1) });
+
+export const GetListingInput = z.object({ sku: z.string().min(1) });
+export const SearchComparableInput = z.object({ query: z.string().min(1), limit: z.number().int().positive().max(20).optional() });
+export const GetOrdersInput = z.object({ since_hours: z.number().positive().optional() });
+export const GetBuyerMessagesInput = z.object({ unreplied_only: z.boolean().optional() });
+export const CreateListingToolInput = z.object({
+  title: z.string().min(1),
+  description: z.string().min(1),
+  category_id: z.string().min(1),
+  price: z.number().positive(),
+  quantity: z.number().int().nonnegative(),
+  sku: z.string().min(1).optional(),
+  floor_price: z.number().positive().optional(),
+});
+export const UpdateListingDetailsInput = z.object({
+  sku: z.string().min(1),
+  title: z.string().min(1).optional(),
+  description: z.string().min(1).optional(),
+});
+export const UpdateListingPriceInput = z.object({ sku: z.string().min(1), price: z.number().positive() });
+export const UpdateListingQuantityInput = z.object({ sku: z.string().min(1), quantity: z.number().int().nonnegative() });
+export const EndListingInput = z.object({ sku: z.string().min(1), reason: z.string().min(1) });
+export const ReplyToBuyerMessageInput = z.object({ message_id: z.string().min(1), body: z.string().min(1) });

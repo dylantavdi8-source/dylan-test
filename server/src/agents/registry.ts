@@ -2,11 +2,11 @@ import type { AgentRole } from "../types.js";
 import type { AgentDefinition } from "./base.js";
 import { SHARED_RULES } from "./base.js";
 import { managerAgent } from "./manager.js";
-import { researchAgent } from "./research.js";
-import { codingAgent } from "./coding.js";
-import { designAgent } from "./design.js";
-import { testingAgent } from "./testing.js";
-import { reviewAgent } from "./review.js";
+import { listingAgent } from "./listing.js";
+import { pricingAgent } from "./pricing.js";
+import { inventoryAgent } from "./inventory.js";
+import { messagesAgent } from "./messages.js";
+import { complianceAgent } from "./compliance.js";
 
 // Central registry. To add a new specialist agent: create agents/<name>.ts exporting an
 // AgentDefinition, add it here, add its tool permissions in llm/tools.ts, and teach the
@@ -14,11 +14,11 @@ import { reviewAgent } from "./review.js";
 // nothing else in the orchestrator needs to change.
 export const AGENTS: Record<AgentRole, AgentDefinition> = {
   manager: managerAgent,
-  research: researchAgent,
-  coding: codingAgent,
-  design: designAgent,
-  testing: testingAgent,
-  review: reviewAgent,
+  listing: listingAgent,
+  pricing: pricingAgent,
+  inventory: inventoryAgent,
+  messages: messagesAgent,
+  compliance: complianceAgent,
 };
 
 export function buildSystemPrompt(role: AgentRole): string {

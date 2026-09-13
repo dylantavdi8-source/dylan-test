@@ -1,12 +1,13 @@
 import type { AgentRole, RunStatus, TaskStatus } from "./types.js";
+import { Crown, Tag, DollarSign, Boxes, MessageCircle, ShieldCheck, type LucideIcon } from "lucide-react";
 
-export const AGENT_META: Record<AgentRole, { label: string; short: string; color: string }> = {
-  manager: { label: "Manager", short: "MGR", color: "#f6c66c" },
-  research: { label: "Research", short: "RES", color: "#6cc6f6" },
-  coding: { label: "Coding", short: "DEV", color: "#8b93ff" },
-  design: { label: "Design", short: "DSN", color: "#f68bd8" },
-  testing: { label: "Testing / QA", short: "QA", color: "#6cf6a0" },
-  review: { label: "Review", short: "REV", color: "#f68b6c" },
+export const AGENT_META: Record<AgentRole, { label: string; short: string; color: string; icon: LucideIcon; blurb: string }> = {
+  manager: { label: "Manager", short: "MGR", color: "#f6c66c", icon: Crown, blurb: "Delegates and synthesizes" },
+  listing: { label: "Listing", short: "LST", color: "#6cc6f6", icon: Tag, blurb: "Creates & edits listings" },
+  pricing: { label: "Pricing", short: "PRC", color: "#6cf6a0", icon: DollarSign, blurb: "Sets & researches prices" },
+  inventory: { label: "Inventory", short: "INV", color: "#f6a06c", icon: Boxes, blurb: "Tracks stock & orders" },
+  messages: { label: "Messages", short: "MSG", color: "#f68bd8", icon: MessageCircle, blurb: "Replies to buyers" },
+  compliance: { label: "Compliance", short: "CMP", color: "#f68b6c", icon: ShieldCheck, blurb: "Verifies before sign-off" },
 };
 
 export const TASK_STATUS_META: Record<TaskStatus, { label: string; className: string; dot: string }> = {
