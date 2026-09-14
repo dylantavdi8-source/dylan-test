@@ -21,6 +21,7 @@ import { store } from "./db/db.js";
 import { getLlmProvider } from "./llm/client.js";
 import { getEbayClient } from "./ebay/index.js";
 import { injectRandomBuyerActivity } from "./ebay/mockClient.js";
+import { startEmailIntake } from "./mail/emailIntake.js";
 
 const PORT = Number(process.env.PORT ?? 8787);
 
@@ -69,4 +70,5 @@ httpServer.listen(PORT, () => {
   if (mode === "mock") {
     console.log("[ai-team] ANTHROPIC_API_KEY not set -- running with the deterministic mock LLM provider. Set it in .env for real agent reasoning.");
   }
+  startEmailIntake();
 });
