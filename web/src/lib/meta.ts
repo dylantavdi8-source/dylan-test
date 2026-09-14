@@ -1,14 +1,26 @@
 import type { AgentRole, RunStatus, TaskStatus } from "./types.js";
 import { Crown, Tag, DollarSign, Boxes, MessageCircle, ShieldCheck, type LucideIcon } from "lucide-react";
 
-export const AGENT_META: Record<AgentRole, { label: string; short: string; color: string; icon: LucideIcon; blurb: string }> = {
-  manager: { label: "Manager", short: "MGR", color: "#f6c66c", icon: Crown, blurb: "Delegates and synthesizes" },
-  listing: { label: "Listing", short: "LST", color: "#6cc6f6", icon: Tag, blurb: "Creates & edits listings" },
-  pricing: { label: "Pricing", short: "PRC", color: "#6cf6a0", icon: DollarSign, blurb: "Sets & researches prices" },
-  inventory: { label: "Inventory", short: "INV", color: "#f6a06c", icon: Boxes, blurb: "Tracks stock & orders" },
-  messages: { label: "Messages", short: "MSG", color: "#f68bd8", icon: MessageCircle, blurb: "Replies to buyers" },
-  compliance: { label: "Compliance", short: "CMP", color: "#f68b6c", icon: ShieldCheck, blurb: "Verifies before sign-off" },
+export const AGENT_META: Record<AgentRole, { name: string; label: string; short: string; color: string; icon: LucideIcon; blurb: string }> = {
+  manager: { name: "Nova", label: "Manager", short: "MGR", color: "#f6c66c", icon: Crown, blurb: "Delegates and synthesizes" },
+  listing: { name: "Milo", label: "Listing", short: "LST", color: "#6cc6f6", icon: Tag, blurb: "Creates & edits listings" },
+  pricing: { name: "Priya", label: "Pricing", short: "PRC", color: "#6cf6a0", icon: DollarSign, blurb: "Sets & researches prices" },
+  inventory: { name: "Ivy", label: "Inventory", short: "INV", color: "#f6a06c", icon: Boxes, blurb: "Tracks stock & orders" },
+  messages: { name: "Sage", label: "Messages", short: "MSG", color: "#f68bd8", icon: MessageCircle, blurb: "Replies to buyers" },
+  compliance: { name: "Cole", label: "Compliance", short: "CMP", color: "#f68b6c", icon: ShieldCheck, blurb: "Verifies before sign-off" },
 };
+
+/** Lighten (positive percent) or darken (negative percent) a "#rrggbb" color. */
+export function shade(hex: string, percent: number): string {
+  const n = hex.replace("#", "");
+  const r = parseInt(n.substring(0, 2), 16);
+  const g = parseInt(n.substring(2, 4), 16);
+  const b = parseInt(n.substring(4, 6), 16);
+  const target = percent < 0 ? 0 : 255;
+  const p = Math.min(Math.abs(percent), 100) / 100;
+  const mix = (c: number) => Math.round((target - c) * p) + c;
+  return `rgb(${mix(r)}, ${mix(g)}, ${mix(b)})`;
+}
 
 export const TASK_STATUS_META: Record<TaskStatus, { label: string; className: string; dot: string }> = {
   pending: { label: "Queued", className: "text-white/45 bg-white/[0.04] border-white/10", dot: "bg-white/30" },

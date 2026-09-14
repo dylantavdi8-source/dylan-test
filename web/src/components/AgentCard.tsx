@@ -47,7 +47,9 @@ export function AgentCard({ role, tasks, active }: { role: AgentRole; tasks: Tas
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
-          <span className="truncate text-sm font-medium text-white/90">{meta.label}</span>
+          <span className="truncate text-sm font-medium text-white/90">
+            {meta.name} <span className="text-white/35">· {meta.label}</span>
+          </span>
           <span className={`flex shrink-0 items-center gap-1.5 text-[10px] ${style.text}`}>
             <span className={`h-1.5 w-1.5 rounded-full ${style.dot}`} />
             {style.label}

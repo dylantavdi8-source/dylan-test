@@ -5,6 +5,7 @@ import type {
   CompetitorListing,
   EbayOrder,
   BuyerMessage,
+  BuyerOffer,
   ActionResult,
 } from "./types.js";
 
@@ -103,10 +104,29 @@ function seedMessages(): BuyerMessage[] {
   ];
 }
 
+function seedOffers(): BuyerOffer[] {
+  const now = Date.now();
+  return [
+    {
+      offerId: "ofr-7001",
+      sku: "MOCK-CASE-BLK-01",
+      listingTitle: "Slim Leather Phone Case - Black - Fits iPhone 14/15",
+      buyerUsername: "dealhunter_99",
+      offerPrice: 19.0,
+      listingPrice: 24.99,
+      receivedAt: now - 5_400_000,
+      status: "pending",
+    },
+  ];
+}
+
 let listings = seedListings();
 const orders = seedOrders();
 let messages = seedMessages();
+let offers = seedOffers();
 let nextSkuNum = 100;
+let nextMessageNum = 9100;
+let nextOfferNum = 7100;
 
 function log(action: string, detail: string) {
   // eslint-disable-next-line no-console
@@ -232,7 +252,83 @@ export function createMockEbayClient(): EbayClient {
       log("replyToBuyerMessage", `${messageId} to ${m.buyerUsername}: "${body.slice(0, 60)}${body.length > 60 ? "..." : ""}"`);
       return { ok: true, dryRun: false, detail: `[MOCK] Reply sent to ${m.buyerUsername} for message ${messageId}.` };
     },
+
+    async getBuyerOffers(pendingOnly = true) {
+      return pendingOnly ? offers.filter((o) => o.status === "pending") : offers;
+    },
+
+    async respondToOffer(offerId: string, action: "accept" | "decline" | "counter", counterPrice?: number): Promise<ActionResult> {
+      const o = offers.find((x) => x.offerId === offerId);
+      if (!o) return { ok: false, dryRun: false, detail: `[MOCK] No such offer: ${offerId}` };
+      if (o.status !== "pending") return { ok: false, dryRun: false, detail: `[MOCK] Offer ${offerId} was already ${o.status}.` };
+      if (action === "accept") {
+        o.status = "accepted";
+        const l = listings.find((x) => x.sku === o.sku);
+        if (l) { l.price = o.offerPrice; l.updatedAt = Date.now(); }
+        log("respondToOffer", `ACCEPTED ${offerId} from ${o.buyerUsername} @ $${o.offerPrice}`);
+        return { ok: true, dryRun: false, detail: `[MOCK] Accepted ${o.buyerUsername}'s offer of $${o.offerPrice.toFixed(2)} on ${o.sku}.` };
+      }
+      if (action === "decline") {
+        o.status = "declined";
+        log("respondToOffer", `DECLINED ${offerId} from ${o.buyerUsername}`);
+        return { ok: true, dryRun: false, detail: `[MOCK] Declined ${o.buyerUsername}'s offer of $${o.offerPrice.toFixed(2)} on ${o.sku}.` };
+      }
+      const price = counterPrice ?? o.listingPrice;
+      const l = listings.find((x) => x.sku === o.sku);
+      if (l && l.floorPrice !== null && price < l.floorPrice) {
+        return { ok: false, dryRun: false, detail: `[MOCK] Counter of $${price.toFixed(2)} is below ${o.sku}'s floor price of $${l.floorPrice.toFixed(2)}; not sent.` };
+      }
+      o.status = "countered";
+      log("respondToOffer", `COUNTERED ${offerId} from ${o.buyerUsername} @ $${price}`);
+      return { ok: true, dryRun: false, detail: `[MOCK] Sent ${o.buyerUsername} a counter-offer of $${price.toFixed(2)} on ${o.sku}.` };
+    },
   };
+}
+
+// --- Simulated live buyer activity ---------------------------------------------------
+// The mock store is static otherwise (nothing "arrives" on its own). This periodically
+// injects one new unreplied message or pending offer on a random existing SKU, so the
+// "notify me when a buyer reaches out" flow has something real (in this mock world) to
+// actually detect and react to.
+export type BuyerActivity =
+  | { kind: "message"; message: BuyerMessage }
+  | { kind: "offer"; offer: BuyerOffer };
+
+export function injectRandomBuyerActivity(): BuyerActivity | null {
+  const targets = listings.filter((l) => l.status === "active");
+  if (targets.length === 0) return null;
+  const target = targets[Math.floor(Math.random() * targets.length)];
+  const buyer = `buyer_${Math.floor(Math.random() * 9000 + 1000)}`;
+
+  if (Math.random() < 0.5) {
+    const message: BuyerMessage = {
+      messageId: `msg-${nextMessageNum++}`,
+      sku: target.sku,
+      listingTitle: target.title,
+      buyerUsername: buyer,
+      subject: "Question",
+      body: `Hi, is the "${target.title}" still available? Also, would you consider ${(target.price * 0.9).toFixed(2)}?`,
+      receivedAt: Date.now(),
+      replied: false,
+    };
+    messages.push(message);
+    log("buyerActivity", `new message ${message.messageId} from ${buyer} on ${target.sku}`);
+    return { kind: "message", message };
+  }
+
+  const offer: BuyerOffer = {
+    offerId: `ofr-${nextOfferNum++}`,
+    sku: target.sku,
+    listingTitle: target.title,
+    buyerUsername: buyer,
+    offerPrice: Number((target.price * (0.75 + Math.random() * 0.15)).toFixed(2)),
+    listingPrice: target.price,
+    receivedAt: Date.now(),
+    status: "pending",
+  };
+  offers.push(offer);
+  log("buyerActivity", `new offer ${offer.offerId} from ${buyer} on ${target.sku}: $${offer.offerPrice}`);
+  return { kind: "offer", offer };
 }
 
 function hash(s: string): number {
@@ -245,5 +341,8 @@ function hash(s: string): number {
 export function resetMockEbayStore(): void {
   listings = seedListings();
   messages = seedMessages();
+  offers = seedOffers();
   nextSkuNum = 100;
+  nextMessageNum = 9100;
+  nextOfferNum = 7100;
 }

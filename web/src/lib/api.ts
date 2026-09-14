@@ -8,11 +8,11 @@ async function asJson<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export async function createRun(prompt: string): Promise<{ runId: string }> {
+export async function createRun(prompt: string, imageDataUrl?: string, sellSpeed?: number): Promise<{ runId: string }> {
   const res = await fetch("/api/runs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt }),
+    body: JSON.stringify({ prompt, imageDataUrl, sellSpeed }),
   });
   return asJson(res);
 }

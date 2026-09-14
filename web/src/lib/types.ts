@@ -13,6 +13,8 @@ export interface RunRecord {
   llmMode: "live" | "mock";
   ebayMode: "live" | "mock";
   ebayLiveActions: boolean;
+  hasImage: boolean;
+  sellSpeed: number;
   error: string | null;
 }
 
@@ -47,3 +49,15 @@ export interface GeneratedFile {
   path: string;
   bytes: number;
 }
+
+export interface BuyerMessageActivity {
+  kind: "message";
+  message: { messageId: string; sku: string | null; listingTitle: string | null; buyerUsername: string; subject: string; body: string; receivedAt: number };
+}
+
+export interface BuyerOfferActivity {
+  kind: "offer";
+  offer: { offerId: string; sku: string; listingTitle: string | null; buyerUsername: string; offerPrice: number; listingPrice: number; receivedAt: number };
+}
+
+export type BuyerActivity = BuyerMessageActivity | BuyerOfferActivity;

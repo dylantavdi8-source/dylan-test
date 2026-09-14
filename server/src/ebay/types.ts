@@ -61,6 +61,17 @@ export interface BuyerMessage {
   replied: boolean;
 }
 
+export interface BuyerOffer {
+  offerId: string;
+  sku: string;
+  listingTitle: string | null;
+  buyerUsername: string;
+  offerPrice: number;
+  listingPrice: number;
+  receivedAt: number;
+  status: "pending" | "accepted" | "declined" | "countered";
+}
+
 export interface ActionResult {
   ok: boolean;
   dryRun: boolean;
@@ -94,4 +105,7 @@ export interface EbayClient {
 
   getBuyerMessages(unrepliedOnly?: boolean): Promise<BuyerMessage[]>;
   replyToBuyerMessage(messageId: string, body: string): Promise<ActionResult>;
+
+  getBuyerOffers(pendingOnly?: boolean): Promise<BuyerOffer[]>;
+  respondToOffer(offerId: string, action: "accept" | "decline" | "counter", counterPrice?: number): Promise<ActionResult>;
 }

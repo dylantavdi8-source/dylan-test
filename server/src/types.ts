@@ -33,6 +33,10 @@ export interface RunRecord {
   llmMode: "live" | "mock";
   ebayMode: "live" | "mock";
   ebayLiveActions: boolean;
+  hasImage: boolean;
+  /** 0-100 dial for how aggressively pricing should discount vs. comps to sell faster.
+   *  50 = price at the comps median. Each point above/below shifts the price ~0.6%. */
+  sellSpeed: number;
   error: string | null;
 }
 

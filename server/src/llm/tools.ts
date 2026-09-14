@@ -95,6 +95,15 @@ export const TOOL_SCHEMAS: Record<string, ToolDefinition> = {
     },
   },
 
+  get_buyer_offers: {
+    name: "get_buyer_offers",
+    description: "Get Best Offers buyers have sent against listings (price negotiation), separate from regular messages.",
+    input_schema: {
+      type: "object",
+      properties: { pending_only: { type: "boolean", description: "Default true -- only offers not yet responded to." } },
+    },
+  },
+
   // --- eBay write tools --------------------------------------------------------------
   // Every one of these may run as a real action or a dry-run simulation depending on
   // EBAY_LIVE_MODE -- the tool result always says which (ok/dryRun fields); report the
@@ -174,6 +183,22 @@ export const TOOL_SCHEMAS: Record<string, ToolDefinition> = {
     },
   },
 
+  respond_to_offer: {
+    name: "respond_to_offer",
+    description:
+      "Accept, decline, or counter a buyer's Best Offer. Accepting will actually change the listing's price to the offer price. " +
+      "A counter may be rejected (ok:false) if it's below the listing's floor price.",
+    input_schema: {
+      type: "object",
+      properties: {
+        offer_id: { type: "string" },
+        action: { type: "string", enum: ["accept", "decline", "counter"] },
+        counter_price: { type: "number", description: "Required when action is 'counter'." },
+      },
+      required: ["offer_id", "action"],
+    },
+  },
+
   // --- generic control-flow tools (unchanged across any agent roster) ----------------
 
   handoff: {
@@ -248,7 +273,15 @@ export const TOOLS_BY_ROLE: Record<AgentRole, string[]> = {
   ],
   pricing: ["get_ebay_listing", "list_ebay_listings", "search_comparable_listings", "update_listing_price", "handoff", "finish_task"],
   inventory: ["list_ebay_listings", "get_ebay_listing", "get_ebay_orders", "update_listing_quantity", "handoff", "finish_task"],
-  messages: ["get_buyer_messages", "get_ebay_listing", "reply_to_buyer_message", "handoff", "finish_task"],
+  messages: [
+    "get_buyer_messages",
+    "get_buyer_offers",
+    "get_ebay_listing",
+    "reply_to_buyer_message",
+    "respond_to_offer",
+    "handoff",
+    "finish_task",
+  ],
   compliance: ["get_ebay_listing", "list_ebay_listings", "get_ebay_orders", "flag_issue", "handoff", "finish_task"],
 };
 
@@ -287,6 +320,12 @@ export const GetListingInput = z.object({ sku: z.string().min(1) });
 export const SearchComparableInput = z.object({ query: z.string().min(1), limit: z.number().int().positive().max(20).optional() });
 export const GetOrdersInput = z.object({ since_hours: z.number().positive().optional() });
 export const GetBuyerMessagesInput = z.object({ unreplied_only: z.boolean().optional() });
+export const GetBuyerOffersInput = z.object({ pending_only: z.boolean().optional() });
+export const RespondToOfferInput = z.object({
+  offer_id: z.string().min(1),
+  action: z.enum(["accept", "decline", "counter"]),
+  counter_price: z.number().positive().optional(),
+});
 export const CreateListingToolInput = z.object({
   title: z.string().min(1),
   description: z.string().min(1),

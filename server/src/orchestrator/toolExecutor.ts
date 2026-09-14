@@ -4,12 +4,14 @@ import {
   SearchComparableInput,
   GetOrdersInput,
   GetBuyerMessagesInput,
+  GetBuyerOffersInput,
   CreateListingToolInput,
   UpdateListingDetailsInput,
   UpdateListingPriceInput,
   UpdateListingQuantityInput,
   EndListingInput,
   ReplyToBuyerMessageInput,
+  RespondToOfferInput,
 } from "../llm/tools.js";
 
 // Executes the side-effecting eBay tools for real (or via the clearly-labeled mock client
@@ -81,6 +83,16 @@ export async function executeEbayTool(name: string, input: unknown): Promise<str
       case "reply_to_buyer_message": {
         const parsed = ReplyToBuyerMessageInput.parse(input);
         const result = await ebay.replyToBuyerMessage(parsed.message_id, parsed.body);
+        return JSON.stringify(result);
+      }
+      case "get_buyer_offers": {
+        const parsed = GetBuyerOffersInput.parse(input);
+        const offers = await ebay.getBuyerOffers(parsed.pending_only);
+        return JSON.stringify({ ok: true, offers });
+      }
+      case "respond_to_offer": {
+        const parsed = RespondToOfferInput.parse(input);
+        const result = await ebay.respondToOffer(parsed.offer_id, parsed.action, parsed.counter_price);
         return JSON.stringify(result);
       }
       default:

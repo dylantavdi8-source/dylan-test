@@ -14,7 +14,9 @@ function ManagerRosterCard({ run, active }: { run: RunRecord; active: boolean })
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
-          <span className="truncate text-sm font-medium text-white/90">Manager</span>
+          <span className="truncate text-sm font-medium text-white/90">
+            {meta.name} <span className="text-white/35">· Manager</span>
+          </span>
           <span className={`flex shrink-0 items-center gap-1.5 text-[10px] ${active ? "text-amber-300" : "text-emerald-300"}`}>
             <span className={`h-1.5 w-1.5 rounded-full ${active ? "bg-amber-400 animate-pulseSoft" : "bg-emerald-400"}`} />
             {active ? "Orchestrating" : "Delegated"}
@@ -83,7 +85,9 @@ function SpotlightHeader({ role, statusLabel, statusClass, dotClass }: { role: A
           <Icon size={24} strokeWidth={2.25} />
         </span>
         <div>
-          <div className="text-base font-semibold text-white/95">{meta.label}</div>
+          <div className="text-base font-semibold text-white/95">
+            {meta.name} <span className="text-white/40">· {meta.label}</span>
+          </div>
           <div className="text-xs text-white/40">{meta.blurb}</div>
         </div>
       </div>

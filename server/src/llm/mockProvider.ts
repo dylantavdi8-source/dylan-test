@@ -31,6 +31,23 @@ function lastAssistantToolUses(messages: ChatMessage[]): { id: string; name: str
   return lastAssistant.content.filter((b): b is { type: "tool_use"; id: string; name: string; input: any } => b.type === "tool_use");
 }
 
+/** Whether a tool with this name has been called at any point earlier in this task's
+ * conversation -- used to drive multi-step mock logic by "what have we already checked"
+ * rather than a brittle fixed turn index. */
+function calledTool(messages: ChatMessage[], name: string): boolean {
+  return messages.some((m) => m.role === "assistant" && m.content.some((b) => b.type === "tool_use" && b.name === name));
+}
+
+function extractDependencySku(context: string): string | null {
+  const m = context.match(/"sku":\s*"([^"]+)"/);
+  return m ? m[1] : null;
+}
+
+function extractSellSpeed(context: string): number {
+  const m = context.match(/## Sell speed:\s*(\d+)\/100/);
+  return m ? Number(m[1]) : 50;
+}
+
 function assistantTurnCount(messages: ChatMessage[]): number {
   return messages.filter((m) => m.role === "assistant").length;
 }
@@ -60,10 +77,11 @@ function lastToolResultJson(messages: ChatMessage[]): any {
   }
 }
 
-const LISTING_KEYWORDS = ["list a", "listing", "publish", "new item", "add a product", "sell a", "create an item", "relist"];
+const LISTING_KEYWORDS = ["list a", "listing", "publish", "new item", "add a product", "sell a", "create an item", "relist", "photo", "picture", "attached"];
 const PRICING_KEYWORDS = ["price", "pricing", "reprice", "discount", "cheaper", "raise the price", "lower the price", "competitor", "market rate", "undercut"];
 const INVENTORY_KEYWORDS = ["inventory", "stock", "quantity", "restock", "out of stock", "sold out", "how many", "units left"];
-const MESSAGES_KEYWORDS = ["message", "buyer", "question", "reply", "respond to", "customer", "inbox"];
+const MESSAGES_KEYWORDS = ["message", "buyer", "question", "reply", "respond to", "customer", "inbox", "offer", "offers", "negotiate"];
+const NEW_LISTING_KEYWORDS = ["create", "new item", "new listing", "add a product", "sell a", "list a", "list this"];
 
 function matchesAny(text: string, keywords: string[]): boolean {
   const lower = text.toLowerCase();
@@ -83,7 +101,8 @@ const DEMO_INVENTORY_SKU = "MOCK-STAND-TAB-03"; // currently active with 0 quant
 
 function planFor(prompt: string) {
   const needsListing = matchesAny(prompt, LISTING_KEYWORDS);
-  const needsPricing = matchesAny(prompt, PRICING_KEYWORDS);
+  const isNewListing = needsListing && matchesAny(prompt, NEW_LISTING_KEYWORDS);
+  const needsPricing = matchesAny(prompt, PRICING_KEYWORDS) || isNewListing;
   const needsInventory = matchesAny(prompt, INVENTORY_KEYWORDS);
   const needsMessages = matchesAny(prompt, MESSAGES_KEYWORDS);
 
@@ -100,10 +119,12 @@ function planFor(prompt: string) {
   if (needsPricing) {
     tasks.push({
       id: "pricing-1",
-      title: "Research and update pricing",
+      title: isNewListing ? "Research comparable listings and set a data-driven starting price" : "Research and update pricing",
       agent_role: "pricing",
-      instructions: `Handle this pricing request against the seller's eBay account: "${prompt}"`,
-      depends_on: [],
+      instructions: isNewListing
+        ? `The listing task (listing-1) just created a new item. Research comparable listings and set a starting price for it based on real market data (and the sell-speed setting, if given) -- do not leave it at a guessed placeholder price.`
+        : `Handle this pricing request against the seller's eBay account: "${prompt}"`,
+      depends_on: isNewListing ? ["listing-1"] : [],
     });
   }
   if (needsInventory) {
@@ -211,6 +232,35 @@ export async function mockComplete(params: { system: string; messages: ChatMessa
 
   // ---------------------------------------------------------------------- pricing
   if (role === "pricing") {
+    // A pricing task that depends on a just-created listing (a real SKU appears in the
+    // dependency context) prices that NEW item from real comps + the sell-speed dial.
+    // Everything else follows the original demo path: it targets the fixed demo SKU and
+    // deliberately undercuts below the floor on attempt 1, so compliance has a genuine
+    // rejection to catch (mirroring how the original mock LLM provider seeds a real bug).
+    const depSku = /## Context from completed dependency tasks/.test(context) ? extractDependencySku(context) : null;
+
+    if (depSku) {
+      if (!calledTool(params.messages, "search_comparable_listings")) {
+        const titleMatch = context.match(/"title":\s*"([^"]+)"/);
+        return respond("Checking comparable listings for market context.", [
+          { name: "search_comparable_listings", input: { query: titleMatch?.[1] ?? "the item", limit: 5 } },
+        ]);
+      }
+      if (!calledTool(params.messages, "update_listing_price")) {
+        const sellSpeed = extractSellSpeed(context);
+        const comps: { price: number }[] = lastResult.results ?? [];
+        const sorted = [...comps].sort((a, b) => a.price - b.price);
+        const median = sorted.length ? sorted[Math.floor(sorted.length / 2)].price : 20;
+        const multiplier = 1 - (sellSpeed - 50) * 0.006;
+        const price = Number(Math.max(1, median * multiplier).toFixed(2));
+        return respond(
+          `Setting a starting price of $${price} from ${comps.length} comparable listing(s)${sellSpeed !== 50 ? ` at sell speed ${sellSpeed}/100` : ""}.`,
+          [{ name: "update_listing_price", input: { sku: depSku, price } }]
+        );
+      }
+      return respond("", [{ name: "finish_task", input: { summary: "Set a comp-based starting price for the new listing.", output: `Tool result: ${JSON.stringify(lastResult)}` } }]);
+    }
+
     if (turn === 0) {
       return respond(`Looking up the current listing before changing anything.`, [{ name: "get_ebay_listing", input: { sku: DEMO_PRICING_SKU } }]);
     }
@@ -219,9 +269,6 @@ export async function mockComplete(params: { system: string; messages: ChatMessa
       return respond("Checking comparable listings for market context.", [{ name: "search_comparable_listings", input: { query: title, limit: 5 } }]);
     }
     if (turn === 2) {
-      // Attempt 1 deliberately undercuts below the floor price the mock store enforces,
-      // so compliance has a real, genuine rejection to catch -- mirroring how the original
-      // dev-team mock shipped a real bug on attempt 1 for QA to find for real.
       const proposedPrice = isRetry ? 13.5 : 8.99;
       return respond(
         isRetry ? "Applying a corrected price that respects the floor." : "Applying a competitive price based on comparable listings.",
@@ -258,29 +305,62 @@ export async function mockComplete(params: { system: string; messages: ChatMessa
     ]);
   }
 
-  // ---------------------------------------------------------------------- messages
+  // ---------------------------------------------------------------------- messages & offers
+  // Driven by "what have we already checked" rather than a fixed turn index, since the
+  // path branches depending on whether there were messages, offers, both, or neither.
   if (role === "messages") {
-    if (turn === 0) {
+    const checkedMessages = calledTool(params.messages, "get_buyer_messages");
+    const checkedOffers = calledTool(params.messages, "get_buyer_offers");
+    const lastAction = lastAssistantToolUses(params.messages)[0]?.name;
+
+    if (!checkedMessages) {
       return respond("Checking for unanswered buyer messages.", [{ name: "get_buyer_messages", input: { unreplied_only: true } }]);
     }
-    if (turn === 1) {
+
+    if (lastAction === "get_buyer_messages") {
       const msgs = lastResult.messages ?? [];
-      if (msgs.length === 0) {
-        return respond("", [{ name: "finish_task", input: { summary: "No unanswered buyer messages found.", output: "get_buyer_messages returned an empty list -- nothing to reply to." } }]);
-      }
-      const target = msgs[0];
-      return respond(`Replying to ${target.buyerUsername}'s question.`, [
-        {
-          name: "reply_to_buyer_message",
-          input: {
-            message_id: target.messageId,
-            body: `[MOCK MODE] Thanks for reaching out! This is a placeholder reply -- no ANTHROPIC_API_KEY is configured, so the messages agent could not reason about your actual question ("${target.body}"). Configure ANTHROPIC_API_KEY for a real, specific answer.`,
+      if (msgs.length > 0) {
+        const target = msgs[0];
+        return respond(`Replying to ${target.buyerUsername}'s question.`, [
+          {
+            name: "reply_to_buyer_message",
+            input: {
+              message_id: target.messageId,
+              body: `[MOCK MODE] Thanks for reaching out! This is a placeholder reply -- no ANTHROPIC_API_KEY is configured, so the messages agent could not reason about your actual question ("${target.body}"). Configure ANTHROPIC_API_KEY for a real, specific answer.`,
+            },
           },
-        },
+        ]);
+      }
+      // No messages -- also check for pending offers before finishing.
+      if (!checkedOffers) {
+        return respond("No unanswered messages -- checking for pending Best Offers.", [{ name: "get_buyer_offers", input: { pending_only: true } }]);
+      }
+      return respond("", [{ name: "finish_task", input: { summary: "No unanswered buyer messages or pending offers found.", output: "Nothing to handle." } }]);
+    }
+
+    if (lastAction === "reply_to_buyer_message" && !checkedOffers) {
+      return respond("Also checking for pending Best Offers.", [{ name: "get_buyer_offers", input: { pending_only: true } }]);
+    }
+
+    if (lastAction === "get_buyer_offers") {
+      const offers = lastResult.offers ?? [];
+      if (offers.length === 0) {
+        return respond("", [{ name: "finish_task", input: { summary: "Handled buyer messages; no pending offers.", output: `Tool result: ${JSON.stringify(lastResult)}` } }]);
+      }
+      const offer = offers[0];
+      if (offer.offerPrice >= offer.listingPrice * 0.85) {
+        return respond(`${offer.buyerUsername}'s offer of $${offer.offerPrice} is close to asking price -- accepting it.`, [
+          { name: "respond_to_offer", input: { offer_id: offer.offerId, action: "accept" } },
+        ]);
+      }
+      const counter = Number((offer.listingPrice * 0.92).toFixed(2));
+      return respond(`${offer.buyerUsername}'s offer of $${offer.offerPrice} is too low -- sending a counter of $${counter}.`, [
+        { name: "respond_to_offer", input: { offer_id: offer.offerId, action: "counter", counter_price: counter } },
       ]);
     }
+
     return respond("", [
-      { name: "finish_task", input: { summary: "Replied to the buyer message.", output: `Tool result: ${JSON.stringify(lastResult)}` } },
+      { name: "finish_task", input: { summary: "Handled buyer messages and offers.", output: `Tool result: ${JSON.stringify(lastResult)}` } },
     ]);
   }
 

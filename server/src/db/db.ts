@@ -22,6 +22,8 @@ CREATE TABLE IF NOT EXISTS runs (
   llm_mode TEXT NOT NULL,
   ebay_mode TEXT NOT NULL DEFAULT 'mock',
   ebay_live_actions INTEGER NOT NULL DEFAULT 0,
+  has_image INTEGER NOT NULL DEFAULT 0,
+  sell_speed INTEGER NOT NULL DEFAULT 50,
   error TEXT
 );
 
@@ -57,6 +59,19 @@ CREATE INDEX IF NOT EXISTS idx_tasks_run ON tasks(run_id);
 CREATE INDEX IF NOT EXISTS idx_events_run ON events(run_id);
 `);
 
+// Lightweight migration for DB files created before these columns existed -- CREATE TABLE
+// IF NOT EXISTS above doesn't add columns to an already-existing table.
+try {
+  db.exec(`ALTER TABLE runs ADD COLUMN has_image INTEGER NOT NULL DEFAULT 0;`);
+} catch {
+  // column already exists -- fine
+}
+try {
+  db.exec(`ALTER TABLE runs ADD COLUMN sell_speed INTEGER NOT NULL DEFAULT 50;`);
+} catch {
+  // column already exists -- fine
+}
+
 function rowToRun(row: any): RunRecord {
   return {
     id: row.id,
@@ -69,6 +84,8 @@ function rowToRun(row: any): RunRecord {
     llmMode: row.llm_mode,
     ebayMode: row.ebay_mode,
     ebayLiveActions: !!row.ebay_live_actions,
+    hasImage: !!row.has_image,
+    sellSpeed: row.sell_speed,
     error: row.error,
   };
 }
@@ -107,8 +124,8 @@ function rowToEvent(row: any): RunEvent {
 export const store = {
   createRun(run: RunRecord) {
     db.prepare(
-      `INSERT INTO runs (id, prompt, status, created_at, updated_at, final_result, workspace_dir, llm_mode, ebay_mode, ebay_live_actions, error)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO runs (id, prompt, status, created_at, updated_at, final_result, workspace_dir, llm_mode, ebay_mode, ebay_live_actions, has_image, sell_speed, error)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       run.id,
       run.prompt,
@@ -120,6 +137,8 @@ export const store = {
       run.llmMode,
       run.ebayMode,
       run.ebayLiveActions ? 1 : 0,
+      run.hasImage ? 1 : 0,
+      run.sellSpeed,
       run.error
     );
   },

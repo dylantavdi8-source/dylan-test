@@ -5,6 +5,7 @@ import type {
   CompetitorListing,
   EbayOrder,
   BuyerMessage,
+  BuyerOffer,
   ActionResult,
 } from "./types.js";
 
@@ -391,6 +392,58 @@ export function createRealEbayClient(cfg: RealClientConfig): EbayClient {
 </AddMemberMessageAAQToPartnerRequest>`
       );
       return { ok: true, dryRun: false, detail: `Replied to message ${messageId}.` };
+    },
+
+    // Best Offer negotiation, like buyer messages above, has no modern REST equivalent --
+    // this uses the same legacy Trading API (GetBestOffers / RespondToBestOffer), authenticated
+    // the same way. Also unverified against a live account in this session; same caveat applies.
+    async getBuyerOffers(pendingOnly = true) {
+      const xml = await tradingCall(
+        "GetBestOffers",
+        `<?xml version="1.0" encoding="utf-8"?>
+<GetBestOffersRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <BestOfferStatus>${pendingOnly ? "Active" : "All"}</BestOfferStatus>
+  <ErrorLanguage>en_US</ErrorLanguage>
+  <WarningLevel>High</WarningLevel>
+</GetBestOffersRequest>`
+      );
+      const blocks = xmlTagAll(xml, "BestOffer");
+      return blocks.map((block): BuyerOffer => {
+        const statusRaw = (xmlTag(block, "Status") ?? "Active").toLowerCase();
+        const status: BuyerOffer["status"] =
+          statusRaw === "accepted" ? "accepted" : statusRaw === "declined" ? "declined" : statusRaw === "countered" ? "countered" : "pending";
+        return {
+          offerId: xmlTag(block, "BestOfferID") ?? "",
+          sku: xmlTag(block, "SKU") ?? "",
+          listingTitle: xmlTag(block, "ItemTitle"),
+          buyerUsername: xmlTag(block, "Buyer") ?? "unknown",
+          offerPrice: Number(xmlTag(block, "Price") ?? 0),
+          listingPrice: Number(xmlTag(block, "ListingPrice") ?? 0),
+          receivedAt: (() => {
+            const t = xmlTag(block, "OfferTime");
+            return t ? new Date(t).getTime() : Date.now();
+          })(),
+          status,
+        };
+      });
+    },
+
+    async respondToOffer(offerId: string, action: "accept" | "decline" | "counter", counterPrice?: number) {
+      if (!cfg.liveActionsEnabled) return dryRunResult(`${action} a Best Offer`, `offer ${offerId}${counterPrice ? ` @ $${counterPrice.toFixed(2)}` : ""}`);
+      const actionTag = action === "accept" ? "AcceptFromSeller" : action === "decline" ? "DeclineFromSeller" : "CounterFromSeller";
+      const counterXml = action === "counter" && counterPrice ? `<CounterOfferPrice currencyID="USD">${counterPrice.toFixed(2)}</CounterOfferPrice>` : "";
+      await tradingCall(
+        "RespondToBestOffer",
+        `<?xml version="1.0" encoding="utf-8"?>
+<RespondToBestOfferRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <BestOfferID>${escapeXml(offerId)}</BestOfferID>
+  <Action>${actionTag}</Action>
+  ${counterXml}
+  <ErrorLanguage>en_US</ErrorLanguage>
+  <WarningLevel>High</WarningLevel>
+</RespondToBestOfferRequest>`
+      );
+      return { ok: true, dryRun: false, detail: `Sent ${action} response for Best Offer ${offerId}.` };
     },
   };
 }

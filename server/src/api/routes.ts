@@ -8,7 +8,17 @@ import { getEbayClient } from "../ebay/index.js";
 
 export const router = Router();
 
-const CreateRunInput = z.object({ prompt: z.string().min(1).max(20000) });
+const CreateRunInput = z.object({
+  prompt: z.string().max(20000),
+  imageDataUrl: z.string().max(16_000_000).optional(),
+  sellSpeed: z.number().int().min(0).max(100).optional(),
+}).refine((v) => v.prompt.trim().length > 0 || !!v.imageDataUrl, { message: "Provide a prompt or a photo." });
+
+function parseDataUrl(dataUrl: string): { mediaType: string; base64: string } | null {
+  const match = /^data:(image\/(?:png|jpeg|jpg|webp));base64,(.+)$/.exec(dataUrl);
+  if (!match) return null;
+  return { mediaType: match[1], base64: match[2] };
+}
 
 router.get("/health", (_req, res) => {
   const ebay = getEbayClient();
@@ -21,7 +31,17 @@ router.post("/runs", async (req, res) => {
     res.status(400).json({ error: parsed.error.issues.map((i) => i.message).join(", ") });
     return;
   }
-  const runId = await startRun(parsed.data.prompt);
+  let image: { mediaType: string; base64: string } | undefined;
+  if (parsed.data.imageDataUrl) {
+    const decoded = parseDataUrl(parsed.data.imageDataUrl);
+    if (!decoded) {
+      res.status(400).json({ error: "Photo must be a PNG, JPEG, or WEBP image." });
+      return;
+    }
+    image = decoded;
+  }
+  const prompt = parsed.data.prompt.trim() || "List this item for sale based on the attached photo.";
+  const runId = await startRun(prompt, image, parsed.data.sellSpeed ?? 50);
   res.status(201).json({ runId });
 });
 

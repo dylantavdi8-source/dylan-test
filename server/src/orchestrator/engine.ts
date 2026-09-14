@@ -29,7 +29,7 @@ function emit(runId: string, taskId: string | null, type: RunEventType, agentRol
   publish(runId, event);
 }
 
-export async function startRun(prompt: string): Promise<string> {
+export async function startRun(prompt: string, image?: { mediaType: string; base64: string }, sellSpeed = 50): Promise<string> {
   const runId = nanoid();
   const now = Date.now();
   const llm = getLlmProvider();
@@ -47,6 +47,8 @@ export async function startRun(prompt: string): Promise<string> {
     llmMode: llm.mode,
     ebayMode: ebay.mode,
     ebayLiveActions: ebay.liveActionsEnabled,
+    hasImage: !!image,
+    sellSpeed,
     error: null,
   };
   store.createRun(run);
@@ -65,7 +67,7 @@ export async function startRun(prompt: string): Promise<string> {
     { llmMode: llm.mode, ebayMode: ebay.mode, ebayLiveActions: ebay.liveActionsEnabled }
   );
 
-  executeRun(runId, prompt, workspaceDir).catch((err) => {
+  executeRun(runId, prompt, workspaceDir, sellSpeed, image).catch((err) => {
     const message = err instanceof Error ? err.message : String(err);
     store.updateRun(runId, { status: "failed", error: message });
     emit(runId, null, "run.failed", null, `Run crashed unexpectedly: ${message}`);
@@ -74,11 +76,17 @@ export async function startRun(prompt: string): Promise<string> {
   return runId;
 }
 
-async function executeRun(runId: string, prompt: string, workspaceDir: string): Promise<void> {
+async function executeRun(
+  runId: string,
+  prompt: string,
+  workspaceDir: string,
+  sellSpeed: number,
+  image?: { mediaType: string; base64: string }
+): Promise<void> {
   const guardrails = new RunGuardrails();
 
   emit(runId, null, "run.planning", "manager", "Manager is analyzing the request and deciding which specialists are needed.");
-  const plan = await runManagerPlanning(runId, prompt, guardrails);
+  const plan = await runManagerPlanning(runId, prompt, guardrails, sellSpeed, image);
 
   if (plan.tasks.length === 0) {
     store.updateRun(runId, { status: "completed", finalResult: plan.directAnswer ?? "No response was produced." });
@@ -122,7 +130,7 @@ async function executeRun(runId: string, prompt: string, workspaceDir: string): 
   );
   store.updateRun(runId, { status: "running" });
 
-  await runTaskGraph(runId, prompt, workspaceDir, guardrails);
+  await runTaskGraph(runId, prompt, workspaceDir, sellSpeed, guardrails);
 
   const finalTasks = store.listTasksForRun(runId);
   const completed = finalTasks.filter((t) => t.status === "completed");
@@ -147,11 +155,14 @@ async function executeRun(runId: string, prompt: string, workspaceDir: string): 
 async function runManagerPlanning(
   runId: string,
   prompt: string,
-  guardrails: RunGuardrails
+  guardrails: RunGuardrails,
+  sellSpeed: number,
+  image?: { mediaType: string; base64: string }
 ): Promise<{ tasks: PlanTaskInput[]; directAnswer?: string }> {
   const result = await runToolLoop({
     system: buildSystemPrompt("manager"),
-    initialUserText: buildPlanningContext(prompt),
+    initialUserText: buildPlanningContext(prompt, !!image, sellSpeed),
+    initialImage: image,
     tools: [TOOL_SCHEMAS.create_plan],
     maxTurns: agentDef("manager").maxToolTurns,
     terminalToolNames: ["create_plan"],
@@ -221,7 +232,7 @@ function buildFallbackSummary(completed: TaskRecord[], failed: TaskRecord[]): st
 // Task graph execution
 // ---------------------------------------------------------------------------
 
-async function runTaskGraph(runId: string, prompt: string, workspaceDir: string, guardrails: RunGuardrails): Promise<void> {
+async function runTaskGraph(runId: string, prompt: string, workspaceDir: string, sellSpeed: number, guardrails: RunGuardrails): Promise<void> {
   // eslint-disable-next-line no-constant-condition
   while (true) {
     const tasks = store.listTasksForRun(runId);
@@ -263,11 +274,11 @@ async function runTaskGraph(runId: string, prompt: string, workspaceDir: string,
     }
 
     const batch = runnable.slice(0, TASK_CONCURRENCY);
-    await Promise.all(batch.map((t) => runSingleTask(runId, prompt, workspaceDir, t, guardrails)));
+    await Promise.all(batch.map((t) => runSingleTask(runId, prompt, workspaceDir, sellSpeed, t, guardrails)));
   }
 }
 
-async function runSingleTask(runId: string, prompt: string, workspaceDir: string, task: TaskRecord, guardrails: RunGuardrails): Promise<void> {
+async function runSingleTask(runId: string, prompt: string, workspaceDir: string, sellSpeed: number, task: TaskRecord, guardrails: RunGuardrails): Promise<void> {
   const attemptNumber = task.attempt + 1;
   store.updateTask(runId, task.id, { status: "running", attempt: attemptNumber });
   const freshTask = store.getTask(runId, task.id)!;
@@ -288,7 +299,7 @@ async function runSingleTask(runId: string, prompt: string, workspaceDir: string
 
   const result = await runToolLoop({
     system: buildSystemPrompt(task.agentRole),
-    initialUserText: buildTaskContext({ prompt, task: freshTask, allTasks, dependencyOutputs }),
+    initialUserText: buildTaskContext({ prompt, task: freshTask, allTasks, dependencyOutputs, sellSpeed }),
     tools: toolsForRole(task.agentRole),
     maxTurns: agentDef(task.agentRole).maxToolTurns,
     terminalToolNames: ["finish_task", "handoff"],

@@ -143,3 +143,22 @@ body {
 .planet-pulse {
   animation: planetPulse 1.4s ease-in-out infinite;
 }
+
+@keyframes haloPulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--halo-color, transparent); opacity: 0.55; }
+  50% { box-shadow: 0 0 32px 8px var(--halo-color, transparent); opacity: 1; }
+}
+.halo-pulse {
+  animation: haloPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes nebulaDrift {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(3%, -2%) scale(1.08); }
+}
+.nebula-drift {
+  animation: nebulaDrift 22s ease-in-out infinite;
+}
+.nebula-drift-rev {
+  animation: nebulaDrift 26s ease-in-out infinite reverse;
+}

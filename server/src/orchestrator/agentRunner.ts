@@ -18,6 +18,7 @@ export interface ToolLoopResult {
 export interface ToolLoopParams {
   system: string;
   initialUserText: string;
+  initialImage?: { mediaType: string; base64: string };
   tools: ToolDefinition[];
   maxTurns: number;
   terminalToolNames: string[];
@@ -35,7 +36,14 @@ export interface ToolLoopParams {
  */
 export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResult> {
   const llm = getLlmProvider();
-  const messages: ChatMessage[] = [{ role: "user", content: [{ type: "text", text: params.initialUserText }] }];
+  const initialContent: ContentBlock[] = [{ type: "text", text: params.initialUserText }];
+  if (params.initialImage) {
+    initialContent.push({
+      type: "image",
+      source: { type: "base64", media_type: params.initialImage.mediaType, data: params.initialImage.base64 },
+    });
+  }
+  const messages: ChatMessage[] = [{ role: "user", content: initialContent }];
   const allToolUses: ToolUseCall[] = [];
   let terminal: ToolUseCall | null = null;
   let turns = 0;
