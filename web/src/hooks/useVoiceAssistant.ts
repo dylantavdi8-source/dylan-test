@@ -4,12 +4,33 @@ const WAKE_PHRASE = "hey galaxy";
 
 export type VoiceStatus = "off" | "wake-listening" | "capturing" | "speaking" | "unsupported";
 
+/** Removes every balanced {...} span (raw JSON tool results embedded in agent output).
+ * Most TTS voices have no idea what to do with a wall of JSON punctuation and end up
+ * reading it symbol-by-symbol -- this keeps that out of anything we actually speak. */
+function stripJsonBlobs(text: string): string {
+  let result = "";
+  let depth = 0;
+  for (const ch of text) {
+    if (ch === "{") { depth++; continue; }
+    if (ch === "}") { if (depth > 0) depth--; continue; }
+    if (depth === 0) result += ch;
+  }
+  return result;
+}
+
 function stripMarkdown(text: string): string {
-  return text
+  return stripJsonBlobs(text)
     .replace(/```[\s\S]*?```/g, "")
-    .replace(/[#*_`>~-]/g, "")
+    .replace(/Tool result:\s*/gi, "")
+    .replace(/,?\s*id=[\w-]+/gi, "")
+    .replace(/_/g, " ")
+    .replace(/[#*`>~-]/g, "")
     .replace(/\[(.*?)\]\((.*?)\)/g, "$1")
+    .replace(/[{}[\]|]/g, "")
+    .replace(/:\s*(?=[.,;!?]|$)/g, "")
     .replace(/\n+/g, ". ")
+    .replace(/\.{2,}/g, ".")
+    .replace(/[ \t]{2,}/g, " ")
     .trim();
 }
 
