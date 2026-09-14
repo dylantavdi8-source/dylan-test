@@ -167,7 +167,7 @@ export function GalaxyView({
 
               {/* Ring, back half (renders behind the sphere) */}
               <span
-                className="absolute left-1/2 top-1/2 h-[40%] w-[175%] rounded-full border-[3px]"
+                className={`absolute left-1/2 top-1/2 h-[40%] w-[175%] rounded-full border-[3px] ${managerBusy ? "manager-glow" : ""}`}
                 style={{
                   transform: "translate(-50%, -50%) rotate(-14deg)",
                   borderColor: `${managerMeta.color}70`,
@@ -178,7 +178,7 @@ export function GalaxyView({
               {/* Sphere */}
               <span
                 className={`absolute inset-0 flex items-center justify-center rounded-full text-lg font-bold text-black/80 ${
-                  managerBusy ? "sun-pulse planet-pulse" : ""
+                  managerBusy ? "manager-pulse manager-glow" : ""
                 }`}
                 style={{
                   backgroundImage: [
@@ -195,7 +195,7 @@ export function GalaxyView({
 
               {/* Ring, front half (renders in front of the sphere, over the bottom) */}
               <span
-                className="absolute left-1/2 top-1/2 h-[40%] w-[175%] rounded-full border-[3px]"
+                className={`absolute left-1/2 top-1/2 h-[40%] w-[175%] rounded-full border-[3px] ${managerBusy ? "manager-glow" : ""}`}
                 style={{
                   transform: "translate(-50%, -50%) rotate(-14deg)",
                   borderColor: `${managerMeta.color}95`,

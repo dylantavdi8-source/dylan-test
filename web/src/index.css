@@ -136,6 +136,24 @@ body {
   animation: sunPulse 2.2s ease-in-out infinite;
 }
 
+/* Manager's own busy animation -- bigger and more obvious than the shared planet
+   pulse below, since it's the focal point of the whole view. */
+@keyframes managerPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.16); }
+}
+.manager-pulse {
+  animation: managerPulse 2.6s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+@keyframes managerGlow {
+  0%, 100% { filter: drop-shadow(0 0 20px rgba(246, 198, 108, 0.55)); }
+  50% { filter: drop-shadow(0 0 52px rgba(246, 198, 108, 1)); }
+}
+.manager-glow {
+  animation: managerGlow 2.6s ease-in-out infinite;
+}
+
 @keyframes planetPulse {
   0%, 100% { transform: scale(1); }
   50% { transform: scale(1.08); }
